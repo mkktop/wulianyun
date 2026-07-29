@@ -34,6 +34,7 @@ func NewRouter() *gin.Engine {
 
 			auth.POST("/products", CreateProduct)
 			auth.GET("/products", ListProducts)
+			auth.GET("/products/:id", GetProduct)
 			auth.PUT("/products/:id", UpdateProduct)
 			auth.DELETE("/products/:id", DeleteProduct)
 			auth.GET("/products/:id/thing-model", GetThingModel)

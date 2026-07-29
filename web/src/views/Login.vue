@@ -3,7 +3,7 @@
     <el-card class="login-card">
       <div class="brand">
         <el-icon :size="36" color="#409EFF"><Platform /></el-icon>
-        <h2>物联云平台</h2>
+        <h2>KK物联云</h2>
         <p>设备接入 · 数据管理 · 实时监控</p>
       </div>
       <el-form :model="form" @keyup.enter="submit">

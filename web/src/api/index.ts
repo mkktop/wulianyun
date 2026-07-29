@@ -169,6 +169,7 @@ export const api = {
   overview: () => http.get('/overview') as Promise<any>,
 
   listProducts: (params?: any) => http.get('/products', { params }) as Promise<Page<Product>>,
+  getProduct: (id: number | string) => http.get(`/products/${id}`) as Promise<Product>,
   createProduct: (data: any) => http.post('/products', data) as Promise<Product>,
   updateProduct: (id: number, data: any) => http.put(`/products/${id}`, data),
   deleteProduct: (id: number) => http.delete(`/products/${id}`),

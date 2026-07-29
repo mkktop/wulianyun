@@ -3,7 +3,7 @@
     <el-aside width="220px" class="aside">
       <div class="logo">
         <el-icon :size="26" color="#409EFF"><Platform /></el-icon>
-        <span>物联云平台</span>
+        <span>KK物联云</span>
       </div>
       <el-menu :default-active="active" router background-color="#001529" text-color="#a6adb4" active-text-color="#fff">
         <el-menu-item index="/overview">

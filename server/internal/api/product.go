@@ -47,9 +47,11 @@ func CreateProduct(c *gin.Context) {
 	if req.PollInterval < 60 {
 		req.PollInterval = 60
 	}
-	// Modbus 接入默认走 TCP 透传网关
+	// Modbus 接入必须走 TCP（MQTT/HTTP 不支持 Modbus）
 	if req.AccessMode == model.AccessModeModbus {
 		req.Protocol = "tcp"
+	} else if req.Protocol == "" {
+		req.Protocol = "mqtt"
 	}
 	p := model.Product{
 		UserID: UID(c), Name: req.Name, ProductKey: "pk" + randHex(8),
@@ -86,6 +88,16 @@ func ListProducts(c *gin.Context) {
 	OK(c, PageData{Total: total, List: list})
 }
 
+func GetProduct(c *gin.Context) {
+	var p model.Product
+	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+		Fail(c, 404, "产品不存在")
+		return
+	}
+	repository.DB.Model(&model.Device{}).Where("product_id = ?", p.ID).Count(&p.DeviceCount)
+	OK(c, p)
+}
+
 func UpdateProduct(c *gin.Context) {
 	var p model.Product
 	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
@@ -97,9 +109,10 @@ func UpdateProduct(c *gin.Context) {
 		Fail(c, 400, "参数错误")
 		return
 	}
+	// 接入方式/协议/密钥模式创建后不可变；仅允许改名称/描述/采集周期
 	updates := map[string]interface{}{"name": req.Name, "description": req.Description}
-	if req.Protocol != "" {
-		updates["protocol"] = req.Protocol
+	if p.AccessMode == model.AccessModeModbus && req.PollInterval >= 60 {
+		updates["poll_interval"] = req.PollInterval
 	}
 	repository.DB.Model(&p).Updates(updates)
 	OK(c, p)

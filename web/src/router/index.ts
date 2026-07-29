@@ -12,6 +12,8 @@ const router = createRouter({
       children: [
         { path: 'overview', component: () => import('../views/Overview.vue'), meta: { title: '平台概览' } },
         { path: 'products', component: () => import('../views/Products.vue'), meta: { title: '产品管理' } },
+        { path: 'products/new', component: () => import('../views/ProductForm.vue'), meta: { title: '创建产品' } },
+        { path: 'products/:id/edit', component: () => import('../views/ProductForm.vue'), meta: { title: '编辑产品' } },
         { path: 'devices', component: () => import('../views/Devices.vue'), meta: { title: '设备管理' } },
         { path: 'devices/:id', component: () => import('../views/DeviceDetail.vue'), meta: { title: '设备详情' } },
         { path: 'rules', component: () => import('../views/Rules.vue'), meta: { title: '规则引擎' } },

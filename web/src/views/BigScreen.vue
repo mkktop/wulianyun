@@ -1,7 +1,7 @@
 <template>
   <div class="screen">
     <div class="screen-header">
-      <h1>物联云平台 · 数据大屏</h1>
+      <h1>KK物联云 · 数据大屏</h1>
       <div class="time">{{ now }}</div>
       <el-button link class="exit" @click="$router.push('/overview')">
         <el-icon color="#7ee7ff" :size="20"><Close /></el-icon>
