@@ -1,0 +1,27 @@
+server:
+  addr: ":8080"
+
+# TCP 透传网关（DTU 接入）
+gateway:
+  addr: ":9100"
+  # 空闲超时(秒)，超时无数据则断开并置为离线
+  idle_timeout: 300
+
+jwt:
+  secret: "iot-platform-jwt-secret-change-me"
+  expire_hours: 72
+
+database:
+  dsn: "host=127.0.0.1 user=iot password=iot123456 dbname=iot port=5432 sslmode=disable TimeZone=Asia/Shanghai"
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+
+mqtt:
+  broker: "tcp://127.0.0.1:1883"
+  client_id: "iot-platform-internal"
+  # 平台内部账号，EMQX 鉴权回调中放行
+  username: "iot-platform-internal"
+  password: "internal-secret-2026"

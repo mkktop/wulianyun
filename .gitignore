@@ -1,0 +1,15 @@
+# tools
+.tools/
+
+# Go
+server/bin/
+*.exe
+
+# Node
+node_modules/
+web/dist/
+
+# IDE / OS
+.idea/
+.vscode/
+Thumbs.db
