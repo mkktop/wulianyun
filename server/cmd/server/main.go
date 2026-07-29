@@ -8,7 +8,9 @@ import (
 	"iot-platform/internal/api"
 	"iot-platform/internal/config"
 	"iot-platform/internal/gateway"
+	"iot-platform/internal/model"
 	"iot-platform/internal/mqtt"
+	"iot-platform/internal/poller"
 	"iot-platform/internal/repository"
 	"iot-platform/internal/rule"
 	"iot-platform/internal/service"
@@ -34,9 +36,17 @@ func main() {
 	// TCP 透传网关（DTU）
 	gateway.Start()
 
-	// 下行分发：TCP 在线设备走网关，否则走 EMQX
+	// Modbus 云端轮询引擎（注册 gateway 上下线钩子）
+	poller.Init()
+
+	// 下行分发：Modbus 产品走点位写入，其他 TCP 在线设备走网关透传，否则走 EMQX
 	service.DownPublisher = func(productKey, deviceName string, payload []byte) error {
 		if gateway.Has(productKey, deviceName) {
+			var p model.Product
+			if repository.DB.Select("access_mode").Where("product_key = ?", productKey).First(&p).Error == nil &&
+				p.AccessMode == model.AccessModeModbus {
+				return poller.WriteProperty(productKey, deviceName, payload)
+			}
 			return gateway.Send(productKey, deviceName, payload)
 		}
 		return mqtt.PublishDown(productKey, deviceName, payload)

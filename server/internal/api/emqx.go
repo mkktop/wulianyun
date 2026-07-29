@@ -33,8 +33,8 @@ func EmqxAuth(c *gin.Context) {
 		c.JSON(200, gin.H{"result": "deny"})
 		return
 	}
-	d, err := service.FindDevice(productKey, deviceName)
-	if err != nil || d.Secret != req.Password || d.Status == model.DeviceStatusDisabled {
+	d, err := service.FindDeviceForAuth(productKey, deviceName, req.Password)
+	if err != nil || d.Status == model.DeviceStatusDisabled {
 		c.JSON(200, gin.H{"result": "deny"})
 		return
 	}

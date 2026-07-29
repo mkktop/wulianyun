@@ -7,12 +7,15 @@ import (
 )
 
 // ThingModel 物模型（TSL）：每个产品一份，JSON 定义属性/事件/服务
-// properties: [{identifier,name,dataType(int/float/bool/enum/string),unit,min,max,accessMode(r/rw)}]
-// services:   [{identifier,name,desc,params:[{identifier,name,dataType}]}]
+// properties: [{identifier,name,dataType(int32/float/double/bool/enum/text/date),
+//               unit,min,max,step,accessMode(r/rw),enumSpec:[{value,label}],desc}]
+// events:     [{identifier,name,type(info/alert/fault),outputs:[{identifier,name,dataType}],desc}]
+// services:   [{identifier,name,async,inputs:[{identifier,name,dataType}],outputs:[...],desc}]
 type ThingModel struct {
 	ID         uint           `gorm:"primaryKey" json:"id"`
 	ProductID  uint           `gorm:"uniqueIndex;not null" json:"productId"`
 	Properties datatypes.JSON `gorm:"type:jsonb;default:'[]'" json:"properties"`
+	Events     datatypes.JSON `gorm:"type:jsonb;default:'[]'" json:"events"`
 	Services   datatypes.JSON `gorm:"type:jsonb;default:'[]'" json:"services"`
 	UpdatedAt  time.Time      `json:"updatedAt"`
 }

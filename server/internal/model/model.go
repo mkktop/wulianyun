@@ -23,6 +23,19 @@ type User struct {
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
+// 产品接入数据模式
+const (
+	AccessModeThingModel  = "thingmodel"  // 标准物模型(JSON)
+	AccessModePassthrough = "passthrough" // 透传解析(脚本)
+	AccessModeModbus      = "modbus"      // Modbus 云端轮询
+)
+
+// 产品密钥模式
+const (
+	SecretModeDevice  = "device"  // 一机一密
+	SecretModeProduct = "product" // 一型一密
+)
+
 type Product struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
 	UserID      uint      `gorm:"index;not null" json:"userId"`
@@ -30,6 +43,10 @@ type Product struct {
 	ProductKey  string    `gorm:"size:32;uniqueIndex;not null" json:"productKey"`
 	Protocol    string    `gorm:"size:16;default:mqtt" json:"protocol"` // mqtt / tcp / http
 	DataFormat  string    `gorm:"size:16;default:json" json:"dataFormat"`
+	AccessMode  string    `gorm:"size:16;default:thingmodel" json:"accessMode"` // thingmodel/passthrough/modbus
+	SecretMode  string    `gorm:"size:16;default:device" json:"secretMode"`     // device/product
+	ProductSecret string  `gorm:"size:64" json:"productSecret"`                 // 一型一密的产品级密钥
+	PollInterval  int     `gorm:"default:60" json:"pollInterval"`               // Modbus 采集周期(秒)
 	CodecScript string    `gorm:"type:text" json:"codecScript"` // 自定义协议解析脚本(JS)
 	Description string    `gorm:"size:255" json:"description"`
 	CreatedAt   time.Time `json:"createdAt"`

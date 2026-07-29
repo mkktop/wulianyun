@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -22,6 +25,49 @@ func FindDevice(productKey, deviceName string) (*model.Device, error) {
 		return nil, err
 	}
 	return &d, nil
+}
+
+// FindDeviceForAuth 接入鉴权：兼容一机一密与一型一密
+//   - 一机一密：校验设备独立 Secret
+//   - 一型一密：secret == 产品 ProductSecret 时，设备不存在则动态注册（自动建设备并生成独立 Secret）
+func FindDeviceForAuth(productKey, deviceName, secret string) (*model.Device, error) {
+	var p model.Product
+	if err := repository.DB.Where("product_key = ?", productKey).First(&p).Error; err != nil {
+		return nil, errors.New("产品不存在")
+	}
+
+	d, err := FindDevice(productKey, deviceName)
+	if err == nil {
+		// 设备已存在：一型一密下允许用设备密钥或产品密钥，一机一密仅设备密钥
+		if d.Secret == secret {
+			return d, nil
+		}
+		if p.SecretMode == model.SecretModeProduct && p.ProductSecret != "" && secret == p.ProductSecret {
+			return d, nil
+		}
+		return nil, errors.New("密钥错误")
+	}
+
+	// 设备不存在：仅一型一密且密钥匹配产品密钥时动态注册
+	if p.SecretMode == model.SecretModeProduct && p.ProductSecret != "" && secret == p.ProductSecret {
+		nd := model.Device{
+			UserID: p.UserID, ProductID: p.ID, ProductKey: productKey,
+			Name: deviceName, Secret: randSecret(),
+			Status: model.DeviceStatusInactive,
+		}
+		if err := repository.DB.Create(&nd).Error; err != nil {
+			return nil, errors.New("动态注册失败")
+		}
+		slog.Info("device auto-registered", "productKey", productKey, "device", deviceName)
+		return &nd, nil
+	}
+	return nil, errors.New("设备不存在或密钥错误")
+}
+
+func randSecret() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // ParseClientID clientid 约定为 {productKey}.{deviceName}

@@ -17,10 +17,13 @@ func randHex(n int) string {
 }
 
 type productReq struct {
-	Name        string `json:"name" binding:"required,max=64"`
-	Protocol    string `json:"protocol" binding:"omitempty,oneof=mqtt tcp http"`
-	DataFormat  string `json:"dataFormat"`
-	Description string `json:"description"`
+	Name         string `json:"name" binding:"required,max=64"`
+	Protocol     string `json:"protocol" binding:"omitempty,oneof=mqtt tcp http"`
+	DataFormat   string `json:"dataFormat"`
+	AccessMode   string `json:"accessMode" binding:"omitempty,oneof=thingmodel passthrough modbus"`
+	SecretMode   string `json:"secretMode" binding:"omitempty,oneof=device product"`
+	PollInterval int    `json:"pollInterval"`
+	Description  string `json:"description"`
 }
 
 func CreateProduct(c *gin.Context) {
@@ -35,9 +38,27 @@ func CreateProduct(c *gin.Context) {
 	if req.DataFormat == "" {
 		req.DataFormat = "json"
 	}
+	if req.AccessMode == "" {
+		req.AccessMode = model.AccessModeThingModel
+	}
+	if req.SecretMode == "" {
+		req.SecretMode = model.SecretModeDevice
+	}
+	if req.PollInterval < 60 {
+		req.PollInterval = 60
+	}
+	// Modbus 接入默认走 TCP 透传网关
+	if req.AccessMode == model.AccessModeModbus {
+		req.Protocol = "tcp"
+	}
 	p := model.Product{
 		UserID: UID(c), Name: req.Name, ProductKey: "pk" + randHex(8),
 		Protocol: req.Protocol, DataFormat: req.DataFormat, Description: req.Description,
+		AccessMode: req.AccessMode, SecretMode: req.SecretMode, PollInterval: req.PollInterval,
+	}
+	// 一型一密：生成产品级密钥
+	if req.SecretMode == model.SecretModeProduct {
+		p.ProductSecret = randHex(16)
 	}
 	if err := repository.DB.Create(&p).Error; err != nil {
 		Fail(c, 500, "创建失败")

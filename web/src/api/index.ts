@@ -38,9 +38,49 @@ export interface Product {
   productKey: string
   protocol: string
   dataFormat: string
+  accessMode: string
+  secretMode: string
+  productSecret: string
+  pollInterval: number
   description: string
   deviceCount: number
   createdAt: string
+}
+
+export interface TslEnumItem {
+  value: number
+  label: string
+}
+
+export interface TslParam {
+  identifier: string
+  name: string
+  dataType: string
+}
+
+export interface TslEvent {
+  identifier: string
+  name: string
+  type: string
+  outputs: TslParam[]
+  desc: string
+}
+
+export interface ModbusPoint {
+  id?: number
+  identifier: string
+  name: string
+  slaveId: number
+  functionCode: number
+  address: number
+  rawType: string
+  bitPosition: number
+  scale: number
+  offset: number
+  swapByte: boolean
+  swapWord: boolean
+  accessMode: string
+  unit: string
 }
 
 export interface Device {
@@ -69,14 +109,19 @@ export interface TslProperty {
   unit: string
   min: number | null
   max: number | null
+  step: number | null
   accessMode: string
+  enumSpec: TslEnumItem[]
+  desc: string
 }
 
 export interface TslService {
   identifier: string
   name: string
+  async: boolean
+  inputs: TslParam[]
+  outputs: TslParam[]
   desc: string
-  params: { identifier: string; name: string; dataType: string }[]
 }
 
 export interface Rule {
@@ -140,9 +185,16 @@ export const api = {
   sendCommand: (id: number | string, payload: any) => http.post(`/devices/${id}/command`, payload),
 
   getThingModel: (productId: number | string) =>
-    http.get(`/products/${productId}/thing-model`) as Promise<{ properties: TslProperty[]; services: TslService[] }>,
-  saveThingModel: (productId: number | string, data: { properties: TslProperty[]; services: TslService[] }) =>
+    http.get(`/products/${productId}/thing-model`) as Promise<{ properties: TslProperty[]; events: TslEvent[]; services: TslService[] }>,
+  saveThingModel: (productId: number | string, data: { properties: TslProperty[]; events: TslEvent[]; services: TslService[] }) =>
     http.put(`/products/${productId}/thing-model`, data),
+
+  getModbusPoints: (productId: number | string) =>
+    http.get(`/products/${productId}/modbus-points`) as Promise<ModbusPoint[]>,
+  saveModbusPoints: (productId: number | string, points: ModbusPoint[]) =>
+    http.put(`/products/${productId}/modbus-points`, { points }),
+  testModbusPoint: (productId: number | string, point: ModbusPoint, hexStr: string) =>
+    http.post(`/products/${productId}/modbus-points/test`, { point, hex: hexStr }) as Promise<{ value: number }>,
 
   getShadow: (id: number | string) => http.get(`/devices/${id}/shadow`) as Promise<any>,
   setProperty: (id: number | string, params: any) => http.post(`/devices/${id}/property`, params) as Promise<any>,

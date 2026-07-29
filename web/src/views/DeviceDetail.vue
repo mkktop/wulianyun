@@ -65,11 +65,16 @@
                 <el-text type="info" size="small">{{ p.identifier }}{{ p.unit ? ' · ' + p.unit : '' }}</el-text>
               </div>
               <el-switch v-if="p.dataType === 'bool'" v-model="propInputs[p.identifier]" />
+              <el-select v-else-if="p.dataType === 'enum'" v-model="propInputs[p.identifier]" style="width: 120px">
+                <el-option v-for="it in (p.enumSpec || [])" :key="it.value" :label="it.label" :value="it.value" />
+              </el-select>
               <el-input-number
-                v-else-if="p.dataType === 'int' || p.dataType === 'float'"
-                v-model="propInputs[p.identifier]" :controls="false" style="width: 110px"
+                v-else-if="p.dataType === 'int32' || p.dataType === 'float' || p.dataType === 'double'"
+                v-model="propInputs[p.identifier]" :controls="false"
+                :min="p.min ?? undefined" :max="p.max ?? undefined" :step="p.step ?? undefined"
+                style="width: 120px"
               />
-              <el-input v-else v-model="propInputs[p.identifier]" style="width: 110px" />
+              <el-input v-else v-model="propInputs[p.identifier]" style="width: 120px" />
               <el-button size="small" type="primary" :loading="settingProp" @click="setModelProp(p)">设置</el-button>
             </div>
           </template>
@@ -214,15 +219,15 @@ async function loadThingModel(productId: number) {
   for (const p of writableProps.value) {
     if (propInputs[p.identifier] === undefined) {
       const cur = latest.value[p.identifier]
-      propInputs[p.identifier] = p.dataType === 'bool' ? Boolean(cur) : cur ?? (p.dataType === 'string' ? '' : 0)
+      propInputs[p.identifier] = p.dataType === 'bool' ? Boolean(cur) : cur ?? (p.dataType === 'text' ? '' : 0)
     }
   }
 }
 
 async function setModelProp(p: TslProperty) {
   let v = propInputs[p.identifier]
-  if (p.dataType === 'int') v = Math.round(Number(v))
-  if (p.dataType === 'float') v = Number(v)
+  if (p.dataType === 'int32') v = Math.round(Number(v))
+  if (p.dataType === 'float' || p.dataType === 'double') v = Number(v)
   settingProp.value = true
   try {
     const res = await api.setProperty(id, { [p.identifier]: v })

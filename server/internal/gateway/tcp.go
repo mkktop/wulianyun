@@ -11,6 +11,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"strings"
@@ -29,11 +30,51 @@ type session struct {
 	productKey string
 	deviceName string
 	productID  uint
+
+	// Modbus 请求-响应：有待响应请求时，收到的帧路由到 waitCh
+	mu       sync.Mutex
+	waitCh   chan []byte
+}
+
+// setWait 开启一次等待响应；返回接收通道与清理函数
+func (s *session) setWait() (chan []byte, func()) {
+	ch := make(chan []byte, 1)
+	s.mu.Lock()
+	s.waitCh = ch
+	s.mu.Unlock()
+	return ch, func() {
+		s.mu.Lock()
+		if s.waitCh == ch {
+			s.waitCh = nil
+		}
+		s.mu.Unlock()
+	}
+}
+
+// deliver 尝试把收到的帧投递给等待中的请求；返回 true 表示已消费
+func (s *session) deliver(data []byte) bool {
+	s.mu.Lock()
+	ch := s.waitCh
+	s.mu.Unlock()
+	if ch == nil {
+		return false
+	}
+	buf := make([]byte, len(data))
+	copy(buf, data)
+	select {
+	case ch <- buf:
+	default:
+	}
+	return true
 }
 
 var (
 	mu       sync.RWMutex
 	sessions = map[string]*session{} // key: productKey.deviceName
+
+	// 上下线钩子（由 poller 注入，用于 Modbus 设备启停轮询；避免循环依赖）
+	OnDeviceConnect    func(productKey, deviceName string, productID uint)
+	OnDeviceDisconnect func(productKey, deviceName string)
 )
 
 func idleTimeout() time.Duration {
@@ -83,8 +124,8 @@ func handleConn(conn net.Conn) {
 		return
 	}
 	productKey, deviceName, secret := parts[0], parts[1], parts[2]
-	d, err := service.FindDevice(productKey, deviceName)
-	if err != nil || d.Secret != secret || d.Status == model.DeviceStatusDisabled {
+	d, err := service.FindDeviceForAuth(productKey, deviceName, secret)
+	if err != nil || d.Status == model.DeviceStatusDisabled {
 		conn.Write([]byte("ERR\n"))
 		return
 	}
@@ -102,6 +143,9 @@ func handleConn(conn net.Conn) {
 	mu.Unlock()
 
 	service.HandleDeviceStatus(key, true)
+	if OnDeviceConnect != nil {
+		OnDeviceConnect(productKey, deviceName, d.ProductID)
+	}
 	slog.Info("dtu connected", "device", key, "remote", conn.RemoteAddr().String())
 
 	defer func() {
@@ -111,6 +155,9 @@ func handleConn(conn net.Conn) {
 			delete(sessions, key)
 			mu.Unlock()
 			service.HandleDeviceStatus(key, false)
+			if OnDeviceDisconnect != nil {
+				OnDeviceDisconnect(productKey, deviceName)
+			}
 		} else {
 			mu.Unlock()
 		}
@@ -124,6 +171,10 @@ func handleConn(conn net.Conn) {
 		n, err := reader.Read(buf)
 		if err != nil {
 			return
+		}
+		// Modbus 请求-响应：有等待中的请求时，投递原始二进制帧（不裁剪）
+		if s.deliver(buf[:n]) {
+			continue
 		}
 		data := bytes.TrimRight(buf[:n], "\r\n")
 		if len(data) == 0 {
@@ -190,4 +241,27 @@ func Send(productKey, deviceName string, payload []byte) error {
 	s.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	_, err := s.conn.Write(out)
 	return err
+}
+
+// Request 发送请求帧并等待应答（Modbus 半双工请求-响应），带超时
+func Request(productKey, deviceName string, reqFrame []byte, timeout time.Duration) ([]byte, error) {
+	mu.RLock()
+	s, ok := sessions[productKey+"."+deviceName]
+	mu.RUnlock()
+	if !ok {
+		return nil, net.ErrClosed
+	}
+	ch, cleanup := s.setWait()
+	defer cleanup()
+
+	s.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if _, err := s.conn.Write(reqFrame); err != nil {
+		return nil, err
+	}
+	select {
+	case resp := <-ch:
+		return resp, nil
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("请求超时")
+	}
 }
