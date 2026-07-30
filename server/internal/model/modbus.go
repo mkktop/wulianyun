@@ -14,10 +14,29 @@ const (
 	FuncWriteMultipleRegs    = 16 // 0x10 写多个寄存器
 )
 
+// 上报策略
+const (
+	ReportModePeriodic = "periodic" // 按周期全量上报
+	ReportModeOnChange = "onchange" // 仅变更上报
+)
+
+// ModbusGroup Modbus 采集组：同组点位共享采集周期与上报策略，支持分频采集
+type ModbusGroup struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	ProductID    uint      `gorm:"index;not null" json:"productId"`
+	Name         string    `gorm:"size:64;not null" json:"name"`
+	PollInterval int       `gorm:"default:60" json:"pollInterval"`            // 采集周期(秒)
+	ReportMode   string    `gorm:"size:16;default:periodic" json:"reportMode"` // periodic / onchange
+	CreatedAt    time.Time `json:"createdAt"`
+
+	PointCount int64 `gorm:"-" json:"pointCount"`
+}
+
 // ModbusPoint Modbus 点位表：产品级配置，平台按此轮询/写入寄存器
 type ModbusPoint struct {
 	ID           uint    `gorm:"primaryKey" json:"id"`
 	ProductID    uint    `gorm:"index;not null" json:"productId"`
+	GroupID      uint    `gorm:"index;default:0" json:"groupId"`    // 所属采集组（0=默认组）
 	Identifier   string  `gorm:"size:50;not null" json:"identifier"` // 映射到物模型属性标识符
 	Name         string  `gorm:"size:64;not null" json:"name"`
 	SlaveID      uint8   `gorm:"default:1" json:"slaveId"`      // 从机地址 1-247
@@ -42,6 +61,14 @@ func (p *ModbusPoint) RegisterCount() uint16 {
 	default:
 		return 1
 	}
+}
+
+// EndAddress 该点位占用的末尾寄存器地址（含）
+func (p *ModbusPoint) EndAddress() uint16 {
+	if p.IsCoilFunc() {
+		return p.Address
+	}
+	return p.Address + p.RegisterCount() - 1
 }
 
 // IsCoilFunc 是否线圈/离散量类操作（按位），否则为寄存器（16 位字）

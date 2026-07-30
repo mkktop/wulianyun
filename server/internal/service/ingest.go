@@ -105,8 +105,23 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 		return
 	}
 
-	// 最新值缓存
-	cache := map[string]interface{}{"ts": now.UnixMilli(), "data": data}
+	// 最新值缓存：按属性合并（分频采集/变更上报场景下，不同批次只含部分属性，不能整条覆盖）
+	merged := map[string]interface{}{}
+	if b, err := repository.RDB.Get(context.Background(), latestKey(d.ID)).Bytes(); err == nil {
+		var old struct {
+			Data map[string]interface{} `json:"data"`
+		}
+		if json.Unmarshal(b, &old) == nil {
+			merged = old.Data
+		}
+	}
+	if merged == nil {
+		merged = map[string]interface{}{}
+	}
+	for k, v := range data {
+		merged[k] = v
+	}
+	cache := map[string]interface{}{"ts": now.UnixMilli(), "data": merged}
 	if b, err := json.Marshal(cache); err == nil {
 		repository.RDB.Set(context.Background(), latestKey(d.ID), b, 0)
 	}

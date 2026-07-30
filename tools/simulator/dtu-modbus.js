@@ -12,9 +12,11 @@ if (!productKey || !deviceName || !secret) {
 
 // 模拟保持寄存器（16 位无符号），可被平台读写
 const registers = {
-  0: 250,  // 温度 x10 = 25.0
-  1: 550,  // 湿度 x10 = 55.0
-  16: 0    // 开关 0/1
+  0: 250,   // 温度 x10 = 25.0（连续地址 0/1/2 会被平台合并成一次请求）
+  1: 550,   // 湿度 x10 = 55.0
+  2: 1013,  // 气压
+  10: 1,    // 状态位（稳定，用于演示变更上报抑制）
+  16: 0     // 开关 0/1（可写）
 }
 
 function crc16(buf) {
@@ -41,7 +43,7 @@ function handleRequest(frame) {
   const func = frame[1]
   const addr = (frame[2] << 8) | frame[3]
 
-  // 读保持寄存器/输入寄存器 0x03/0x04
+  // 读保持寄存器/输入寄存器 0x03/0x04（支持批量连续寄存器）
   if (func === 0x03 || func === 0x04) {
     const qty = (frame[4] << 8) | frame[5]
     const bytes = [slave, func, qty * 2]
@@ -49,9 +51,10 @@ function handleRequest(frame) {
       const v = registers[addr + i] || 0
       bytes.push((v >> 8) & 0xFF, v & 0xFF)
     }
-    // 温湿度轻微波动
+    // 温湿度气压波动；状态位(10)与开关(16)保持稳定
     registers[0] = 240 + Math.floor(Math.random() * 60)
     registers[1] = 400 + Math.floor(Math.random() * 300)
+    registers[2] = 1000 + Math.floor(Math.random() * 30)
     return appendCRC(bytes)
   }
   // 写单个寄存器 0x06

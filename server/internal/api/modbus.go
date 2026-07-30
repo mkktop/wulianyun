@@ -26,6 +26,7 @@ func GetModbusPoints(c *gin.Context) {
 type modbusPointReq struct {
 	Identifier   string  `json:"identifier"`
 	Name         string  `json:"name"`
+	GroupID      uint    `json:"groupId"`
 	SlaveID      uint8   `json:"slaveId"`
 	FunctionCode int     `json:"functionCode"`
 	Address      uint16  `json:"address"`
@@ -79,7 +80,7 @@ func SaveModbusPoints(c *gin.Context) {
 			r.AccessMode = "r"
 		}
 		points = append(points, model.ModbusPoint{
-			ProductID: p.ID, Identifier: r.Identifier, Name: r.Name,
+			ProductID: p.ID, GroupID: r.GroupID, Identifier: r.Identifier, Name: r.Name,
 			SlaveID: r.SlaveID, FunctionCode: r.FunctionCode, Address: r.Address,
 			RawType: r.RawType, BitPosition: r.BitPosition, Scale: r.Scale, Offset: r.Offset,
 			SwapByte: r.SwapByte, SwapWord: r.SwapWord, AccessMode: r.AccessMode, Unit: r.Unit,

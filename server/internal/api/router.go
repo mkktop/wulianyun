@@ -45,6 +45,10 @@ func NewRouter() *gin.Engine {
 			auth.GET("/products/:id/modbus-points", GetModbusPoints)
 			auth.PUT("/products/:id/modbus-points", SaveModbusPoints)
 			auth.POST("/products/:id/modbus-points/test", TestModbusPoint)
+			auth.GET("/products/:id/modbus-groups", ListModbusGroups)
+			auth.POST("/products/:id/modbus-groups", CreateModbusGroup)
+			auth.PUT("/products/:id/modbus-groups/:gid", UpdateModbusGroup)
+			auth.DELETE("/products/:id/modbus-groups/:gid", DeleteModbusGroup)
 			auth.GET("/products/:id/stats", ProductStats)
 			auth.POST("/products/:id/devices/batch", BatchCreateDevices)
 

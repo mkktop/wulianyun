@@ -32,8 +32,10 @@ type session struct {
 	productID  uint
 
 	// Modbus 请求-响应：有待响应请求时，收到的帧路由到 waitCh
-	mu       sync.Mutex
-	waitCh   chan []byte
+	mu     sync.Mutex
+	waitCh chan []byte
+	// reqMu 串行化同一连接上的请求-响应（Modbus 半双工，多采集组/写操作并发时必须排队）
+	reqMu  sync.Mutex
 }
 
 // setWait 开启一次等待响应；返回接收通道与清理函数
@@ -243,7 +245,7 @@ func Send(productKey, deviceName string, payload []byte) error {
 	return err
 }
 
-// Request 发送请求帧并等待应答（Modbus 半双工请求-响应），带超时
+// Request 发送请求帧并等待应答（Modbus 半双工请求-响应），带超时；同一连接上串行执行
 func Request(productKey, deviceName string, reqFrame []byte, timeout time.Duration) ([]byte, error) {
 	mu.RLock()
 	s, ok := sessions[productKey+"."+deviceName]
@@ -251,6 +253,10 @@ func Request(productKey, deviceName string, reqFrame []byte, timeout time.Durati
 	if !ok {
 		return nil, net.ErrClosed
 	}
+	// 串行化：多个采集组/写操作并发时排队，避免应答错配
+	s.reqMu.Lock()
+	defer s.reqMu.Unlock()
+
 	ch, cleanup := s.setWait()
 	defer cleanup()
 

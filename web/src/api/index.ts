@@ -70,6 +70,7 @@ export interface ModbusPoint {
   id?: number
   identifier: string
   name: string
+  groupId: number
   slaveId: number
   functionCode: number
   address: number
@@ -81,6 +82,15 @@ export interface ModbusPoint {
   swapWord: boolean
   accessMode: string
   unit: string
+}
+
+export interface ModbusGroup {
+  id: number
+  productId: number
+  name: string
+  pollInterval: number
+  reportMode: string
+  pointCount: number
 }
 
 export interface Device {
@@ -228,6 +238,15 @@ export const api = {
     http.put(`/products/${productId}/modbus-points`, { points }),
   testModbusPoint: (productId: number | string, point: ModbusPoint, hexStr: string) =>
     http.post(`/products/${productId}/modbus-points/test`, { point, hex: hexStr }) as Promise<{ value: number }>,
+
+  listModbusGroups: (productId: number | string) =>
+    http.get(`/products/${productId}/modbus-groups`) as Promise<ModbusGroup[]>,
+  createModbusGroup: (productId: number | string, data: any) =>
+    http.post(`/products/${productId}/modbus-groups`, data) as Promise<ModbusGroup>,
+  updateModbusGroup: (productId: number | string, gid: number, data: any) =>
+    http.put(`/products/${productId}/modbus-groups/${gid}`, data),
+  deleteModbusGroup: (productId: number | string, gid: number) =>
+    http.delete(`/products/${productId}/modbus-groups/${gid}`),
 
   getShadow: (id: number | string) => http.get(`/devices/${id}/shadow`) as Promise<any>,
   setProperty: (id: number | string, params: any) => http.post(`/devices/${id}/property`, params) as Promise<any>,

@@ -26,6 +26,9 @@ type task struct {
 var (
 	mu    sync.Mutex
 	tasks = map[string]*task{} // key: productKey.deviceName
+
+	// 变更上报缓存：key = productKey.deviceName.identifier -> 上次上报值
+	lastValues sync.Map
 )
 
 // Init 注册到 gateway 的上下线钩子
@@ -57,10 +60,6 @@ func onDisconnect(productKey, deviceName string) {
 
 func startDevice(p *model.Product, deviceName string) {
 	key := p.ProductKey + "." + deviceName
-	interval := time.Duration(p.PollInterval) * time.Second
-	if interval < 60*time.Second {
-		interval = 60 * time.Second
-	}
 	cancel := make(chan struct{})
 	mu.Lock()
 	if old, ok := tasks[key]; ok {
@@ -69,57 +68,117 @@ func startDevice(p *model.Product, deviceName string) {
 	tasks[key] = &task{cancel: cancel}
 	mu.Unlock()
 
-	go func() {
-		// 上线立即采集一次，随后按周期轮询
-		pollOnce(p, deviceName)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-cancel:
-				return
-			case <-ticker.C:
-				pollOnce(p, deviceName)
-			}
-		}
-	}()
-	slog.Info("modbus poller started", "device", key, "interval", interval.String())
+	// 按采集组分别调度（分频）；未分组点位归入默认组（产品周期）
+	groups := loadGroups(p)
+	for i := range groups {
+		g := groups[i]
+		go runGroup(p, deviceName, g, cancel)
+	}
+	slog.Info("modbus poller started", "device", key, "groups", len(groups))
 }
 
-// pollOnce 遍历读点位，逐条下发请求并解析，聚合为一条遥测
-func pollOnce(p *model.Product, deviceName string) {
+// groupPlan 采集组调度单元
+type groupPlan struct {
+	id         uint
+	name       string
+	interval   time.Duration
+	reportMode string
+}
+
+// loadGroups 返回该产品的采集组（含一个虚拟默认组 id=0 承载未分组点位）
+func loadGroups(p *model.Product) []groupPlan {
+	var gs []model.ModbusGroup
+	repository.DB.Where("product_id = ?", p.ID).Find(&gs)
+	plans := []groupPlan{{
+		id: 0, name: "默认组",
+		interval: clampInterval(p.PollInterval), reportMode: model.ReportModePeriodic,
+	}}
+	for _, g := range gs {
+		plans = append(plans, groupPlan{
+			id: g.ID, name: g.Name,
+			interval: clampInterval(g.PollInterval), reportMode: g.ReportMode,
+		})
+	}
+	return plans
+}
+
+func clampInterval(sec int) time.Duration {
+	if sec < 1 {
+		sec = 60
+	}
+	return time.Duration(sec) * time.Second
+}
+
+// runGroup 单个采集组的独立调度循环
+func runGroup(p *model.Product, deviceName string, g groupPlan, cancel chan struct{}) {
+	pollGroup(p, deviceName, g)
+	ticker := time.NewTicker(g.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-cancel:
+			return
+		case <-ticker.C:
+			pollGroup(p, deviceName, g)
+		}
+	}
+}
+
+// pollGroup 采集一个组：合并连续寄存器批量读取 → 变更过滤 → 上报
+func pollGroup(p *model.Product, deviceName string, g groupPlan) {
 	var points []model.ModbusPoint
-	repository.DB.Where("product_id = ?", p.ID).Order("id asc").Find(&points)
+	repository.DB.Where("product_id = ? AND group_id = ?", p.ID, g.id).Order("address asc").Find(&points)
 	if len(points) == 0 {
 		return
 	}
-	data := map[string]interface{}{}
+	ptrs := make([]*model.ModbusPoint, 0, len(points))
 	for i := range points {
-		pt := &points[i]
-		// 仅轮询读功能码(1-4)；纯写点位跳过
-		if pt.FunctionCode < model.FuncReadCoils || pt.FunctionCode > model.FuncReadInputRegisters {
-			continue
-		}
-		req, err := modbus.BuildReadRequest(pt)
-		if err != nil {
-			continue
-		}
+		ptrs = append(ptrs, &points[i])
+	}
+
+	// 合并为最少的批量读请求
+	blocks := modbus.PlanReadBlocks(ptrs)
+	data := map[string]interface{}{}
+	for _, b := range blocks {
+		req := modbus.BuildBlockRequest(b)
 		resp, err := gateway.Request(p.ProductKey, deviceName, req, requestTimeout)
 		if err != nil {
-			slog.Warn("modbus poll failed", "device", deviceName, "point", pt.Identifier, "err", err)
+			slog.Warn("modbus block poll failed", "device", deviceName, "group", g.name,
+				"slave", b.SlaveID, "start", b.Start, "qty", b.Quantity, "err", err)
 			continue
 		}
-		v, err := modbus.ParseResponse(pt, resp)
+		vals, err := modbus.ParseBlockResponse(b, resp)
 		if err != nil {
-			slog.Warn("modbus parse failed", "device", deviceName, "point", pt.Identifier, "err", err)
+			slog.Warn("modbus block parse failed", "device", deviceName, "group", g.name, "err", err)
 			continue
 		}
-		data[pt.Identifier] = round2(v)
+		for id, v := range vals {
+			data[id] = round2(v)
+		}
 	}
-	if len(data) > 0 {
-		payload, _ := json.Marshal(data)
-		service.HandleTelemetry(p.ProductKey, deviceName, payload)
+	if len(data) == 0 {
+		return
 	}
+
+	// 变更上报：只保留与上次不同的点位
+	if g.reportMode == model.ReportModeOnChange {
+		changed := map[string]interface{}{}
+		for id, v := range data {
+			ck := p.ProductKey + "." + deviceName + "." + id
+			if old, ok := lastValues.Load(ck); ok && old == v {
+				continue
+			}
+			lastValues.Store(ck, v)
+			changed[id] = v
+		}
+		if len(changed) == 0 {
+			return
+		}
+		data = changed
+	}
+
+	payload, _ := json.Marshal(data)
+	service.HandleTelemetry(p.ProductKey, deviceName, payload)
 }
 
 // WriteProperty 写控制：解析 property.set 载荷，按点位表写寄存器/线圈
