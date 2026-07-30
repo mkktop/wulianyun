@@ -11,13 +11,19 @@
           <el-option label="未激活" value="inactive" />
           <el-option label="已禁用" value="disabled" />
         </el-select>
+        <el-select v-model="groupId" placeholder="全部分组" clearable style="width: 150px" @change="load">
+          <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="String(g.id)" />
+        </el-select>
         <el-input v-model="keyword" placeholder="搜索设备名称" clearable style="width: 200px" @change="load">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
       </div>
-      <el-button type="primary" @click="dialogVisible = true">
-        <el-icon><Plus /></el-icon>&nbsp;添加设备
-      </el-button>
+      <div>
+        <el-button @click="groupMgrVisible = true">分组管理</el-button>
+        <el-button type="primary" @click="dialogVisible = true">
+          <el-icon><Plus /></el-icon>&nbsp;添加设备
+        </el-button>
+      </div>
     </div>
 
     <el-table :data="list" v-loading="loading" stripe>
@@ -26,24 +32,33 @@
           <el-link type="primary" @click="$router.push(`/devices/${row.id}`)">{{ row.name }}</el-link>
         </template>
       </el-table-column>
-      <el-table-column prop="productName" label="所属产品" min-width="130" />
-      <el-table-column label="状态" width="100">
+      <el-table-column prop="productName" label="所属产品" min-width="120" />
+      <el-table-column label="状态" width="90">
         <template #default="{ row }">
           <el-tag :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="最后上线" width="170">
+      <el-table-column label="分组" width="110">
+        <template #default="{ row }">{{ row.groupName || '-' }}</template>
+      </el-table-column>
+      <el-table-column label="标签" min-width="120">
+        <template #default="{ row }">
+          <el-tag v-for="t in parseTags(row.tags)" :key="t" size="small" style="margin-right: 4px">{{ t }}</el-tag>
+          <span v-if="!parseTags(row.tags).length" class="muted">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="最后上线" width="160">
         <template #default="{ row }">{{ fmt(row.lastOnlineAt) }}</template>
       </el-table-column>
-      <el-table-column prop="remark" label="备注" min-width="130" show-overflow-tooltip />
-      <el-table-column label="操作" width="220" fixed="right">
+      <el-table-column label="操作" width="210" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="$router.push(`/devices/${row.id}`)">详情</el-button>
-          <el-button link type="warning" @click="toggleDisable(row)">
+          <el-button link type="primary" size="small" @click="$router.push(`/devices/${row.id}`)">详情</el-button>
+          <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button link type="warning" size="small" @click="toggleDisable(row)">
             {{ row.status === 'disabled' ? '启用' : '禁用' }}
           </el-button>
           <el-popconfirm title="确定删除该设备？" @confirm="del(row)">
-            <template #reference><el-button link type="danger">删除</el-button></template>
+            <template #reference><el-button link type="danger" size="small">删除</el-button></template>
           </el-popconfirm>
         </template>
       </el-table-column>
@@ -74,24 +89,73 @@
       <el-button type="primary" :loading="saving" @click="save">确定</el-button>
     </template>
   </el-dialog>
+
+  <!-- 编辑设备：分组/标签/备注 -->
+  <el-dialog v-model="editVisible" title="编辑设备" width="460px">
+    <el-form label-width="80px">
+      <el-form-item label="设备名称">
+        <el-text>{{ editing?.name }}</el-text>
+      </el-form-item>
+      <el-form-item label="分组">
+        <el-select v-model="editForm.groupId" clearable placeholder="未分组" style="width: 100%">
+          <el-option :value="0" label="未分组" />
+          <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="标签">
+        <div class="tag-edit">
+          <el-tag v-for="(t, i) in editForm.tags" :key="t" closable @close="editForm.tags.splice(i, 1)">{{ t }}</el-tag>
+          <el-input v-model="newTag" size="small" style="width: 100px" placeholder="+标签" @keyup.enter="addTag" @blur="addTag" />
+        </div>
+      </el-form-item>
+      <el-form-item label="备注">
+        <el-input v-model="editForm.remark" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="editVisible = false">取消</el-button>
+      <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 分组管理 -->
+  <el-dialog v-model="groupMgrVisible" title="分组管理" width="520px">
+    <div class="group-add">
+      <el-input v-model="newGroupName" placeholder="新分组名称" style="flex: 1" />
+      <el-button type="primary" @click="addGroup">添加</el-button>
+    </div>
+    <el-table :data="groups" size="small" max-height="320">
+      <el-table-column prop="name" label="分组名称" min-width="140" />
+      <el-table-column prop="deviceCount" label="设备数" width="80" />
+      <el-table-column label="操作" width="100">
+        <template #default="{ row }">
+          <el-popconfirm title="删除分组？组内设备将置为未分组" @confirm="removeGroup(row)">
+            <template #reference><el-button link type="danger" size="small">删除</el-button></template>
+          </el-popconfirm>
+        </template>
+      </el-table-column>
+    </el-table>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { api, type Device, type Product } from '../api'
+import { api, type Device, type DeviceGroup, type Product } from '../api'
 import { realtime } from '../utils/realtime'
 
 const route = useRoute()
 const list = ref<Device[]>([])
 const products = ref<Product[]>([])
+const groups = ref<DeviceGroup[]>([])
 const total = ref(0)
 const page = ref(1)
 const size = 10
 const keyword = ref('')
 const status = ref('')
 const productId = ref((route.query.productId as string) || '')
+const groupId = ref('')
 const loading = ref(false)
 const dialogVisible = ref(false)
 const saving = ref(false)
@@ -99,12 +163,75 @@ const form = reactive<{ productId: number | null; name: string; remark: string }
   productId: null, name: '', remark: ''
 })
 
+// 编辑设备
+const editVisible = ref(false)
+const editing = ref<Device | null>(null)
+const editForm = reactive<{ groupId: number; tags: string[]; remark: string }>({ groupId: 0, tags: [], remark: '' })
+const newTag = ref('')
+
+// 分组管理
+const groupMgrVisible = ref(false)
+const newGroupName = ref('')
+
+function parseTags(v: any): string[] {
+  if (!v) return []
+  if (Array.isArray(v)) return v
+  try { return JSON.parse(v) } catch { return [] }
+}
+
+function openEdit(row: Device) {
+  editing.value = row
+  editForm.groupId = row.groupId || 0
+  editForm.tags = [...parseTags(row.tags)]
+  editForm.remark = row.remark
+  newTag.value = ''
+  editVisible.value = true
+}
+
+function addTag() {
+  const t = newTag.value.trim()
+  if (t && !editForm.tags.includes(t)) editForm.tags.push(t)
+  newTag.value = ''
+}
+
+async function saveEdit() {
+  saving.value = true
+  try {
+    await api.updateDevice(editing.value!.id, {
+      remark: editForm.remark, groupId: editForm.groupId, tags: editForm.tags
+    })
+    ElMessage.success('已保存')
+    editVisible.value = false
+    load()
+  } finally {
+    saving.value = false
+  }
+}
+
+async function loadGroups() {
+  groups.value = await api.listGroups()
+}
+
+async function addGroup() {
+  if (!newGroupName.value.trim()) return
+  await api.createGroup({ name: newGroupName.value.trim() })
+  newGroupName.value = ''
+  loadGroups()
+}
+
+async function removeGroup(g: DeviceGroup) {
+  await api.deleteGroup(g.id)
+  ElMessage.success('已删除')
+  loadGroups()
+  load()
+}
+
 async function load() {
   loading.value = true
   try {
     const res = await api.listDevices({
       page: page.value, size, keyword: keyword.value,
-      status: status.value, productId: productId.value
+      status: status.value, productId: productId.value, groupId: groupId.value
     })
     list.value = res.list
     total.value = res.total
@@ -169,6 +296,7 @@ function onMsg(msg: any) {
 onMounted(() => {
   load()
   loadProducts()
+  loadGroups()
   realtime.on(onMsg)
 })
 onUnmounted(() => realtime.off(onMsg))
@@ -178,4 +306,7 @@ onUnmounted(() => realtime.off(onMsg))
 .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; }
 .filters { display: flex; gap: 12px; }
 .pager { margin-top: 16px; justify-content: flex-end; }
+.tag-edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.group-add { display: flex; gap: 8px; margin-bottom: 12px; }
+.muted { color: #c0c4cc; }
 </style>

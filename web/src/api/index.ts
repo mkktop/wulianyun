@@ -91,6 +91,9 @@ export interface Device {
   name: string
   secret: string
   status: string
+  groupId: number
+  groupName: string
+  tags: string[] | string
   remark: string
   lastOnlineAt: string | null
   lastOfflineAt: string | null
@@ -160,6 +163,35 @@ export interface OpenApp {
   createdAt: string
 }
 
+export interface EventReport {
+  id: number
+  deviceId: number
+  deviceName: string
+  identifier: string
+  type: string
+  params: any
+  createdAt: string
+}
+
+export interface CommandLog {
+  id: number
+  deviceId: number
+  deviceName: string
+  channel: string
+  payload: string
+  success: boolean
+  error: string
+  createdAt: string
+}
+
+export interface DeviceGroup {
+  id: number
+  name: string
+  description: string
+  deviceCount: number
+  createdAt: string
+}
+
 // ---- 接口 ----
 export const api = {
   login: (data: { username: string; password: string }) =>
@@ -219,5 +251,17 @@ export const api = {
   listApps: () => http.get('/apps') as Promise<OpenApp[]>,
   createApp: (name: string) => http.post('/apps', { name }) as Promise<OpenApp>,
   updateApp: (id: number, data: any) => http.put(`/apps/${id}`, data),
-  deleteApp: (id: number) => http.delete(`/apps/${id}`)
+  deleteApp: (id: number) => http.delete(`/apps/${id}`),
+
+  productStats: (id: number | string) => http.get(`/products/${id}/stats`) as Promise<any>,
+  batchCreateDevices: (productId: number | string, names: string[]) =>
+    http.post(`/products/${productId}/devices/batch`, { names }) as Promise<{ created: number; failed: { name: string; reason: string }[] }>,
+
+  listEventReports: (params?: any) => http.get('/event-reports', { params }) as Promise<Page<EventReport>>,
+  listCommandLogs: (params?: any) => http.get('/command-logs', { params }) as Promise<Page<CommandLog>>,
+
+  listGroups: () => http.get('/groups') as Promise<DeviceGroup[]>,
+  createGroup: (data: any) => http.post('/groups', data) as Promise<DeviceGroup>,
+  updateGroup: (id: number, data: any) => http.put(`/groups/${id}`, data),
+  deleteGroup: (id: number) => http.delete(`/groups/${id}`)
 }

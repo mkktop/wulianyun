@@ -10,7 +10,11 @@
     </div>
 
     <el-table :data="list" v-loading="loading" stripe>
-      <el-table-column prop="name" label="产品名称" min-width="140" />
+      <el-table-column label="产品名称" min-width="140">
+        <template #default="{ row }">
+          <el-link type="primary" @click="$router.push(`/products/${row.id}`)">{{ row.name }}</el-link>
+        </template>
+      </el-table-column>
       <el-table-column label="ProductKey" min-width="200">
         <template #default="{ row }">
           <el-text type="info">{{ row.productKey }}</el-text>
@@ -31,15 +35,16 @@
         </template>
       </el-table-column>
       <el-table-column prop="deviceCount" label="设备数" width="80" />
-      <el-table-column label="创建时间" width="160">
-        <template #default="{ row }">{{ fmt(row.createdAt) }}</template>
+      <el-table-column label="创建时间" width="120">
+        <template #default="{ row }">{{ fmtDate(row.createdAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="210" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="$router.push(`/products/${row.id}/edit`)">配置</el-button>
-          <el-button link type="primary" @click="$router.push(`/devices?productId=${row.id}`)">设备</el-button>
+          <el-button link type="primary" size="small" @click="$router.push(`/products/${row.id}`)">详情</el-button>
+          <el-button link type="primary" size="small" @click="$router.push(`/products/${row.id}/edit`)">配置</el-button>
+          <el-button link type="primary" size="small" @click="$router.push(`/devices?productId=${row.id}`)">设备</el-button>
           <el-popconfirm title="确定删除该产品？" @confirm="del(row)">
-            <template #reference><el-button link type="danger">删除</el-button></template>
+            <template #reference><el-button link type="danger" size="small">删除</el-button></template>
           </el-popconfirm>
         </template>
       </el-table-column>
@@ -93,8 +98,8 @@ function copy(text: string) {
   ElMessage.success('已复制')
 }
 
-function fmt(s: string) {
-  return s ? new Date(s).toLocaleString('zh-CN', { hour12: false }) : '-'
+function fmtDate(s: string) {
+  return s ? new Date(s).toLocaleDateString('zh-CN') : '-'
 }
 
 onMounted(load)

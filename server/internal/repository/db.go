@@ -32,6 +32,7 @@ func Init() error {
 		&model.Telemetry{}, &model.DeviceEvent{},
 		&model.ThingModel{}, &model.DeviceShadow{}, &model.Rule{}, &model.Alarm{},
 		&model.OpenApp{}, &model.ModbusPoint{},
+		&model.EventReport{}, &model.CommandLog{}, &model.DeviceGroup{},
 	); err != nil {
 		return err
 	}

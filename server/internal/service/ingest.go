@@ -79,7 +79,7 @@ func ParseClientID(clientID string) (productKey, deviceName string, ok bool) {
 	return parts[0], parts[1], true
 }
 
-// HandleTelemetry 处理设备上行遥测（JSON 对象）
+// HandleTelemetry 处理设备上行数据（JSON 对象）；含 method=event.post 时分流到事件上报
 func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	var data map[string]interface{}
 	if err := json.Unmarshal(payload, &data); err != nil || len(data) == 0 {
@@ -89,6 +89,12 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	d, err := FindDevice(productKey, deviceName)
 	if err != nil {
 		slog.Warn("telemetry from unknown device", "productKey", productKey, "device", deviceName)
+		return
+	}
+
+	// 事件上报分流
+	if m, ok := data["method"].(string); ok && m == "event.post" {
+		handleEventReport(d, data)
 		return
 	}
 

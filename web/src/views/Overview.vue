@@ -2,10 +2,12 @@
   <div>
     <el-row :gutter="16">
       <el-col :span="6" v-for="card in cards" :key="card.label">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat">
-            <el-icon :size="40" :color="card.color"><component :is="card.icon" /></el-icon>
-            <div>
+        <el-card shadow="hover" class="stat-card" :body-style="{ padding: '0' }">
+          <div class="stat" :style="{ borderTopColor: card.color }">
+            <div class="stat-icon" :style="{ background: card.bg, color: card.color }">
+              <el-icon :size="26"><component :is="card.icon" /></el-icon>
+            </div>
+            <div class="stat-body">
               <div class="num">{{ card.value }}</div>
               <div class="label">{{ card.label }}</div>
             </div>
@@ -14,10 +16,24 @@
       </el-col>
     </el-row>
 
-    <el-card shadow="never" class="chart-card">
-      <template #header>近7日消息量趋势</template>
-      <div ref="chartRef" class="chart"></div>
-    </el-card>
+    <el-row :gutter="16" class="chart-row">
+      <el-col :span="16">
+        <el-card shadow="never" class="chart-card">
+          <template #header>
+            <div class="card-head"><span>近7日消息量趋势</span></div>
+          </template>
+          <div ref="chartRef" class="chart"></div>
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card shadow="never" class="chart-card">
+          <template #header>
+            <div class="card-head"><span>设备状态分布</span></div>
+          </template>
+          <div ref="pieRef" class="chart"></div>
+        </el-card>
+      </el-col>
+    </el-row>
   </div>
 </template>
 
@@ -27,20 +43,26 @@ import * as echarts from 'echarts'
 import { api } from '../api'
 import { realtime } from '../utils/realtime'
 
-const data = ref<any>({ productCount: 0, deviceCount: 0, onlineCount: 0, msgToday: 0, msgTrend: [] })
+const data = ref<any>({ productCount: 0, deviceCount: 0, onlineCount: 0, msgToday: 0, msgTrend: [], statusDist: [] })
 const chartRef = ref<HTMLElement>()
+const pieRef = ref<HTMLElement>()
 const chart = shallowRef<echarts.ECharts>()
+const pie = shallowRef<echarts.ECharts>()
 
 const cards = computed(() => [
-  { label: '产品总数', value: data.value.productCount, icon: 'Box', color: '#409EFF' },
-  { label: '设备总数', value: data.value.deviceCount, icon: 'Cpu', color: '#67C23A' },
-  { label: '在线设备', value: data.value.onlineCount, icon: 'Connection', color: '#E6A23C' },
-  { label: '今日消息', value: data.value.msgToday, icon: 'ChatDotSquare', color: '#F56C6C' }
+  { label: '产品总数', value: data.value.productCount, icon: 'Box', color: '#409EFF', bg: '#ecf5ff' },
+  { label: '设备总数', value: data.value.deviceCount, icon: 'Cpu', color: '#67C23A', bg: '#f0f9eb' },
+  { label: '在线设备', value: data.value.onlineCount, icon: 'Connection', color: '#E6A23C', bg: '#fdf6ec' },
+  { label: '今日消息', value: data.value.msgToday, icon: 'ChatDotSquare', color: '#F56C6C', bg: '#fef0f0' }
 ])
+
+const statusNames: Record<string, string> = { online: '在线', offline: '离线', inactive: '未激活', disabled: '已禁用' }
+const statusColors: Record<string, string> = { online: '#67C23A', offline: '#909399', inactive: '#E6A23C', disabled: '#F56C6C' }
 
 async function load() {
   data.value = await api.overview()
   renderChart()
+  renderPie()
 }
 
 function renderChart() {
@@ -48,14 +70,40 @@ function renderChart() {
   if (!chart.value) chart.value = echarts.init(chartRef.value)
   const trend: { day: string; count: number }[] = data.value.msgTrend || []
   chart.value.setOption({
-    grid: { left: 50, right: 20, top: 30, bottom: 30 },
+    grid: { left: 50, right: 20, top: 20, bottom: 30 },
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: trend.map((t) => t.day) },
-    yAxis: { type: 'value' },
+    xAxis: { type: 'category', data: trend.map((t) => t.day), axisTick: { show: false } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed' } } },
     series: [{
-      type: 'bar', name: '消息量', barMaxWidth: 40,
-      itemStyle: { color: '#409EFF', borderRadius: [4, 4, 0, 0] },
+      type: 'bar', name: '消息量', barMaxWidth: 36,
+      itemStyle: {
+        borderRadius: [4, 4, 0, 0],
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: '#66b1ff' }, { offset: 1, color: '#409EFF' }
+        ])
+      },
       data: trend.map((t) => t.count)
+    }]
+  })
+}
+
+function renderPie() {
+  if (!pieRef.value) return
+  if (!pie.value) pie.value = echarts.init(pieRef.value)
+  const dist: { status: string; count: number }[] = data.value.statusDist || []
+  const pieData = dist.map((s) => ({
+    name: statusNames[s.status] || s.status,
+    value: s.count,
+    itemStyle: { color: statusColors[s.status] || '#909399' }
+  }))
+  pie.value.setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    legend: { bottom: 0, icon: 'circle' },
+    series: [{
+      type: 'pie', radius: ['45%', '68%'], center: ['50%', '44%'],
+      avoidLabelOverlap: true,
+      label: { show: true, formatter: '{b}\n{c}' },
+      data: pieData.length ? pieData : [{ name: '暂无设备', value: 1, itemStyle: { color: '#ebeef5' } }]
     }]
   })
 }
@@ -65,7 +113,7 @@ function onMsg(msg: any) {
   if (msg.type === 'device_status') load()
 }
 
-const onResize = () => chart.value?.resize()
+const onResize = () => { chart.value?.resize(); pie.value?.resize() }
 
 onMounted(() => {
   load()
@@ -76,13 +124,26 @@ onUnmounted(() => {
   realtime.off(onMsg)
   window.removeEventListener('resize', onResize)
   chart.value?.dispose()
+  pie.value?.dispose()
 })
 </script>
 
 <style scoped>
-.stat-card .stat { display: flex; align-items: center; gap: 16px; }
-.num { font-size: 26px; font-weight: 700; }
-.label { color: #999; font-size: 13px; }
-.chart-card { margin-top: 16px; }
-.chart { height: 360px; }
+.stat-card { border-radius: 10px; overflow: hidden; transition: transform 0.2s; }
+.stat-card:hover { transform: translateY(-2px); }
+.stat {
+  display: flex; align-items: center; gap: 16px; padding: 20px;
+  border-top: 3px solid transparent;
+}
+.stat-icon {
+  width: 56px; height: 56px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.stat-body { min-width: 0; }
+.num { font-size: 28px; font-weight: 700; line-height: 1.2; color: #303133; }
+.label { color: #909399; font-size: 13px; margin-top: 4px; }
+.chart-row { margin-top: 16px; }
+.card-head { font-weight: 600; }
+.chart-card { border-radius: 10px; }
+.chart { height: 340px; }
 </style>

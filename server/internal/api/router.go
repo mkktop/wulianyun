@@ -45,6 +45,8 @@ func NewRouter() *gin.Engine {
 			auth.GET("/products/:id/modbus-points", GetModbusPoints)
 			auth.PUT("/products/:id/modbus-points", SaveModbusPoints)
 			auth.POST("/products/:id/modbus-points/test", TestModbusPoint)
+			auth.GET("/products/:id/stats", ProductStats)
+			auth.POST("/products/:id/devices/batch", BatchCreateDevices)
 
 			auth.POST("/devices", CreateDevice)
 			auth.GET("/devices", ListDevices)
@@ -72,6 +74,14 @@ func NewRouter() *gin.Engine {
 			auth.GET("/apps", ListOpenApps)
 			auth.PUT("/apps/:id", UpdateOpenApp)
 			auth.DELETE("/apps/:id", DeleteOpenApp)
+
+			auth.GET("/event-reports", ListEventReports)
+			auth.GET("/command-logs", ListCommandLogs)
+
+			auth.POST("/groups", CreateGroup)
+			auth.GET("/groups", ListGroups)
+			auth.PUT("/groups/:id", UpdateGroup)
+			auth.DELETE("/groups/:id", DeleteGroup)
 		}
 	}
 

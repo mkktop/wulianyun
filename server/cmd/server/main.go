@@ -39,17 +39,25 @@ func main() {
 	// Modbus 云端轮询引擎（注册 gateway 上下线钩子）
 	poller.Init()
 
-	// 下行分发：Modbus 产品走点位写入，其他 TCP 在线设备走网关透传，否则走 EMQX
+	// 下行分发：Modbus 产品走点位写入，其他 TCP 在线设备走网关透传，否则走 EMQX；统一记录下发日志
 	service.DownPublisher = func(productKey, deviceName string, payload []byte) error {
+		var err error
+		channel := "mqtt"
 		if gateway.Has(productKey, deviceName) {
 			var p model.Product
 			if repository.DB.Select("access_mode").Where("product_key = ?", productKey).First(&p).Error == nil &&
 				p.AccessMode == model.AccessModeModbus {
-				return poller.WriteProperty(productKey, deviceName, payload)
+				channel = "modbus"
+				err = poller.WriteProperty(productKey, deviceName, payload)
+			} else {
+				channel = "tcp"
+				err = gateway.Send(productKey, deviceName, payload)
 			}
-			return gateway.Send(productKey, deviceName, payload)
+		} else {
+			err = mqtt.PublishDown(productKey, deviceName, payload)
 		}
-		return mqtt.PublishDown(productKey, deviceName, payload)
+		go service.LogCommand(productKey, deviceName, channel, payload, err)
+		return err
 	}
 
 	// 离线告警巡检

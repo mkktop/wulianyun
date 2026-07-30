@@ -62,12 +62,15 @@ type Device struct {
 	Name          string     `gorm:"size:64;not null;uniqueIndex:idx_product_device,priority:2" json:"name"`
 	Secret        string     `gorm:"size:64;not null" json:"secret"`
 	Status        string     `gorm:"size:16;default:inactive;index" json:"status"`
+	GroupID       uint       `gorm:"index;default:0" json:"groupId"`             // 设备分组（0=未分组）
+	Tags          datatypes.JSON `gorm:"type:jsonb;default:'[]'" json:"tags"`     // 标签数组
 	Remark        string     `gorm:"size:255" json:"remark"`
 	LastOnlineAt  *time.Time `json:"lastOnlineAt"`
 	LastOfflineAt *time.Time `json:"lastOfflineAt"`
 	CreatedAt     time.Time  `json:"createdAt"`
 
 	ProductName string `gorm:"-" json:"productName"`
+	GroupName   string `gorm:"-" json:"groupName"`
 }
 
 // Telemetry 遥测数据（TimescaleDB 超表，无主键）

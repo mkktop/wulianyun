@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+
 	"github.com/gin-gonic/gin"
 
 	"iot-platform/internal/model"
@@ -54,6 +56,9 @@ func ListDevices(c *gin.Context) {
 	if st := c.Query("status"); st != "" {
 		q = q.Where("status = ?", st)
 	}
+	if gid := c.Query("groupId"); gid != "" {
+		q = q.Where("group_id = ?", gid)
+	}
 	var total int64
 	q.Count(&total)
 	page, size := pageArgs(c)
@@ -62,17 +67,29 @@ func ListDevices(c *gin.Context) {
 		Fail(c, 500, "查询失败")
 		return
 	}
-	// 补充产品名称
+	// 补充产品与分组名称
 	pidNames := map[uint]string{}
+	gidNames := map[uint]string{}
 	for i := range list {
 		if name, ok := pidNames[list[i].ProductID]; ok {
 			list[i].ProductName = name
-			continue
+		} else {
+			var p model.Product
+			if repository.DB.Select("name").First(&p, list[i].ProductID).Error == nil {
+				pidNames[list[i].ProductID] = p.Name
+				list[i].ProductName = p.Name
+			}
 		}
-		var p model.Product
-		if repository.DB.Select("name").First(&p, list[i].ProductID).Error == nil {
-			pidNames[list[i].ProductID] = p.Name
-			list[i].ProductName = p.Name
+		if list[i].GroupID > 0 {
+			if name, ok := gidNames[list[i].GroupID]; ok {
+				list[i].GroupName = name
+			} else {
+				var g model.DeviceGroup
+				if repository.DB.Select("name").First(&g, list[i].GroupID).Error == nil {
+					gidNames[list[i].GroupID] = g.Name
+					list[i].GroupName = g.Name
+				}
+			}
 		}
 	}
 	OK(c, PageData{Total: total, List: list})
@@ -98,14 +115,23 @@ func UpdateDevice(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Remark  string `json:"remark"`
-		Disable *bool  `json:"disable"`
+		Remark  string          `json:"remark"`
+		Disable *bool           `json:"disable"`
+		GroupID *uint           `json:"groupId"`
+		Tags    []string        `json:"tags"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, 400, "参数错误")
 		return
 	}
 	updates := map[string]interface{}{"remark": req.Remark}
+	if req.GroupID != nil {
+		updates["group_id"] = *req.GroupID
+	}
+	if req.Tags != nil {
+		tags, _ := json.Marshal(req.Tags)
+		updates["tags"] = tags
+	}
 	if req.Disable != nil {
 		if *req.Disable {
 			updates["status"] = model.DeviceStatusDisabled

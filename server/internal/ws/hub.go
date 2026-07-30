@@ -108,6 +108,11 @@ func (h *Hub) PushAlarm(userID uint, payload interface{}) {
 	h.push(userID, nil, OutMsg{Type: "alarm", Payload: payload})
 }
 
+// PushEvent 推送设备事件上报给该用户所有连接
+func (h *Hub) PushEvent(userID uint, payload interface{}) {
+	h.push(userID, nil, OutMsg{Type: "event", Payload: payload})
+}
+
 func (h *Hub) push(userID uint, onlyDevice *uint, msg OutMsg) {
 	data, _ := json.Marshal(msg)
 	h.mu.RLock()
