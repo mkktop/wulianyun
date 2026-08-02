@@ -2,6 +2,7 @@ package rule
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -13,13 +14,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
 	"iot-platform/internal/ws"
 )
 
-// silenceCache 静默期缓存 ruleID:deviceID -> 上次触发时间
+// silenceCache 静默期缓存 ruleID:deviceID -> 上次触发时间（内存级，单实例）
 var silenceCache sync.Map
+
+// redisSilenceRDB Redis 客户端（多实例模式下使用，nil 时退化为内存缓存）
+var redisSilenceRDB *redis.Client
+
+// UseRedisSilence 启用 Redis 静默缓存（多实例模式）
+func UseRedisSilence(rdb *redis.Client) {
+	redisSilenceRDB = rdb
+}
 
 // ruleCache 规则缓存：按 userID 分组，TTL 30s
 var (
@@ -341,9 +352,20 @@ func inSilence(r *model.Rule, deviceID uint) bool {
 	if r.Silence <= 0 {
 		return false
 	}
-	key := strconv.FormatUint(uint64(r.ID), 10) + ":" + strconv.FormatUint(uint64(deviceID), 10)
-	if v, ok := silenceCache.Load(key); ok {
-		if time.Since(v.(time.Time)) < time.Duration(r.Silence)*time.Minute {
+	key := "silence:" + strconv.FormatUint(uint64(r.ID), 10) + ":" + strconv.FormatUint(uint64(deviceID), 10)
+	ttl := time.Duration(r.Silence) * time.Minute
+
+	// 多实例模式：Redis 检查
+	if redisSilenceRDB != nil {
+		ctx := context.Background()
+		val, err := redisSilenceRDB.Get(ctx, key).Result()
+		return err == nil && val != "" // key 存在说明在静默期内
+	}
+
+	// 单实例退化：内存检查
+	keyMem := strconv.FormatUint(uint64(r.ID), 10) + ":" + strconv.FormatUint(uint64(deviceID), 10)
+	if v, ok := silenceCache.Load(keyMem); ok {
+		if time.Since(v.(time.Time)) < ttl {
 			return true
 		}
 	}
@@ -351,8 +373,19 @@ func inSilence(r *model.Rule, deviceID uint) bool {
 }
 
 func markFired(r *model.Rule, deviceID uint) {
-	key := strconv.FormatUint(uint64(r.ID), 10) + ":" + strconv.FormatUint(uint64(deviceID), 10)
-	silenceCache.Store(key, time.Now())
+	key := "silence:" + strconv.FormatUint(uint64(r.ID), 10) + ":" + strconv.FormatUint(uint64(deviceID), 10)
+	ttl := time.Duration(r.Silence) * time.Minute
+
+	// 多实例模式：Redis 设置带 TTL
+	if redisSilenceRDB != nil {
+		ctx := context.Background()
+		redisSilenceRDB.Set(ctx, key, "1", ttl)
+		return
+	}
+
+	// 单实例退化：内存存储
+	keyMem := strconv.FormatUint(uint64(r.ID), 10) + ":" + strconv.FormatUint(uint64(deviceID), 10)
+	silenceCache.Store(keyMem, time.Now())
 }
 
 func compare(v interface{}, op string, target interface{}) bool {

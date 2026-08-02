@@ -61,3 +61,8 @@ poller:
 log:
   trace_retention_days: 7
   device_log_retention_days: 30
+
+# EMQX 规则引擎：启用后 EMQX 直写 TimescaleDB，后端跳过遥测 DB 写入
+# 启用前需先在 EMQX Dashboard 中配置数据桥接（见 deploy/emqx/rules/README.md）
+emqx_rule:
+  enabled: false

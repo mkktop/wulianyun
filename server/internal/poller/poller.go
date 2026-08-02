@@ -3,6 +3,7 @@
 package poller
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,6 +11,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"iot-platform/internal/gateway"
 	"iot-platform/internal/model"
@@ -39,6 +42,14 @@ var (
 	// 并发限制信号量
 	pollSemaphore chan struct{}
 )
+
+// 多实例分布式锁：Redis SETNX 防止多实例重复采集同一设备组
+var rdb *redis.Client
+
+// InitDistributedLock 初始化 Redis 客户端用于分布式锁
+func InitDistributedLock() {
+	rdb = repository.RDB
+}
 
 // InitPollerSemaphore 初始化轮询并发信号量
 func InitPollerSemaphore(maxConcurrent int) {
@@ -178,6 +189,17 @@ func runGroup(p *model.Product, deviceName string, g groupPlan, cancel chan stru
 
 // pollGroup 采集一个组：合并连续寄存器批量读取 → 变更过滤 → 上报
 func pollGroup(p *model.Product, deviceName string, g groupPlan) {
+	// 多实例分布式锁：获取锁才执行采集，防止多实例重复轮询同一设备组
+	lockKey := fmt.Sprintf("poller:lock:%d_%d_%s", p.ID, g.id, deviceName)
+	if rdb != nil {
+		ctx := context.Background()
+		ok, err := rdb.SetNX(ctx, lockKey, "1", 60*time.Second).Result()
+		if err != nil || !ok {
+			return // 其他实例正在采集，跳过
+		}
+		defer rdb.Del(ctx, lockKey)
+	}
+
 	// 获取信号量
 	if pollSemaphore != nil {
 		select {

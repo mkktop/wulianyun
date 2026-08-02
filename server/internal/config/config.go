@@ -70,6 +70,9 @@ type Config struct {
 		TraceRetentionDays int `yaml:"trace_retention_days"` // 消息轨迹保留天数
 		DeviceLogRetentionDays int `yaml:"device_log_retention_days"` // 设备日志保留天数
 	} `yaml:"log"`
+	EMQXRule struct {
+		Enabled bool `yaml:"enabled"` // EMQX 规则引擎接管遥测入库，后端跳过 DB 写入
+	} `yaml:"emqx_rule"`
 }
 
 var C Config

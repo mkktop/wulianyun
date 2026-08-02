@@ -14,6 +14,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"iot-platform/internal/config"
 	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
 	"iot-platform/internal/rule"
@@ -157,15 +158,19 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	// TSL 物模型校验
 	t1 := time.Now()
 	valid, validationErrors := ValidateTelemetry(d.ProductID, data)
-	t := model.Telemetry{
-		Ts: now, DeviceID: d.ID, ProductKey: productKey, DeviceName: deviceName,
-		Data: payload, Valid: valid,
+
+	// 快慢路径分离：EMQX 规则引擎开启时跳过 DB 写入（快路径），仅做业务逻辑
+	if !config.C.EMQXRule.Enabled {
+		t := model.Telemetry{
+			Ts: now, DeviceID: d.ID, ProductKey: productKey, DeviceName: deviceName,
+			Data: payload, Valid: valid,
+		}
+		if !valid && len(validationErrors) > 0 {
+			errJSON, _ := json.Marshal(validationErrors)
+			t.ValidationErrors = errJSON
+		}
+		AppendTelemetry(t)
 	}
-	if !valid && len(validationErrors) > 0 {
-		errJSON, _ := json.Marshal(validationErrors)
-		t.ValidationErrors = errJSON
-	}
-	AppendTelemetry(t)
 	t2 := time.Now()
 
 	// 最新值缓存：按属性合并（Redis Lua 原子操作，避免竞态）

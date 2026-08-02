@@ -19,6 +19,7 @@ import (
 	"iot-platform/internal/repository"
 	"iot-platform/internal/rule"
 	"iot-platform/internal/service"
+	"iot-platform/internal/ws"
 )
 
 func main() {
@@ -39,6 +40,19 @@ func main() {
 	service.InitTelemetryBuffer(config.C.TelemetryBuffer.MaxBatch, config.C.TelemetryBuffer.FlushInterval)
 	service.InitShadowCache(config.C.Cache.ShadowFlushInterval)
 	poller.InitPollerSemaphore(config.C.Poller.MaxConcurrent)
+
+	// 多实例：Redis Pub/Sub 跨实例广播 WebSocket 消息
+	ws.RedisPubSub = repository.NewRedisPubSub()
+	ws.StartPubSub()
+
+	// 多实例：轮询分布式锁初始化
+	poller.InitDistributedLock()
+
+	// 多实例：规则静默缓存迁移到 Redis
+	rule.UseRedisSilence(repository.RDB)
+
+	// 多实例：TCP 下行通道跨实例路由
+	service.InitDownRouter(repository.RDB)
 
 	api.EnsureAdmin()
 
