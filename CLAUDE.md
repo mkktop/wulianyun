@@ -103,3 +103,39 @@ The platform runs horizontally; several subsystems use Redis and degrade to sing
 - **Frontend**: single axios client at `/api/v1`; WebSocket at `/api/v1/ws` — send `{type:"subscribe",deviceId}` to filter telemetry to subscribed devices. `/screen` (BigScreen) is outside the auth-protected layout. Routes are lazy-loaded in `web/src/router/index.ts`.
 - **Graceful shutdown**: `main.go` traps SIGINT/SIGTERM, tears down perf components in reverse order (shadow cache → telemetry buffer flush), then `srv.Shutdown(5s)`.
 - `server/server.exe`, `server/bin/`, `web/dist/`, `.tools/`, and `node_modules/` are build artifacts / vendored tooling — gitignored, do not edit.
+
+## Test Deployment (Aliyun ECS)
+
+The platform is deployed on an Aliyun ECS used as the **ongoing test server**:
+
+- **Host**: 阿里云 ECS 测试机（2 核 / 1.6 GB RAM / Ubuntu 26.04，已装 Docker 29 + Compose v5）。**公网 IP / 内网 IP / SSH 密码均不写入仓库**——见本地 `memory/prod-deployment.md` 或询问用户。
+- **SSH**: `root@<test-server>`；密码见本地 gitignored `.claude/` 或 `memory/prod-deployment.md`。本机无 `sshpass`，用 `paramiko`（Python）驱动，而非 shell `ssh`。
+- **On server**: code at `/opt/wulianyun`; generated secrets at `/opt/wulianyun/deploy/prod/.env` (run `bash setup.sh` to generate, `--force` to regenerate). Stack runs via `docker compose` from `/opt/wulianyun/deploy/prod`.
+- **Public access**: web `:80`、MQTT `:1883`、DTU/TCP `:9100`——三者在阿里云安全组均放行。EMQX dashboard `:18083` 仅绑 `127.0.0.1`（经 SSH 隧道访问）。`8080/5432/6379` 仅内部。
+
+### ⚠️ Thin-image deploy (this server can NOT run the repo's multi-stage build)
+
+The repo's `server/Dockerfile` / `web/Dockerfile` are self-contained **multi-stage** builds — fine on a 4 GB+ machine, but on this 1.6 GB box with rate-limited CN registry mirrors, `docker compose up --build` **hangs on buildkit metadata resolution and OOMs** (npm + Go compile in parallel). Deploy with **prebuilt artifacts + thin single-stage Dockerfiles** instead:
+
+1. **Local prebuild** (on the dev box):
+   ```powershell
+   cd server; GOOS=linux GOARCH=amd64 CGO_ENABLED=0 .tools\go\bin\go.exe build -trimpath -ldflags="-s -w" -o ..\_kk\server-linux .\cmd\server
+   cd ..\web; npm run build   # → web/dist
+   ```
+2. **Thin Dockerfiles** (single stage): `FROM alpine:3.20` + `COPY server-linux /app/server` (+ `COPY configs`, `ca-certificates`, `tzdata`, non-root `app`); `FROM nginx:1.27-alpine` + `COPY dist` + `COPY nginx.conf`. The web one needs `web/.dockerignore` to **keep `dist/`** (the repo's excludes it for multi-stage).
+3. **Upload** via SFTP — but the server's SFTP (paramiko + OpenSSH 10.3) **rejects absolute remote paths** (ENOENT on open-for-write); use **relative paths** (SFTP CWD is `/root`), or tar + relative put + `tar xzf` over `/opt/wulianyun` (preserves `.env`/`config.prod.yaml`).
+4. **On server**: `cd /opt/wulianyun/deploy/prod && docker compose build && docker compose up -d`.
+
+### Server-specific gotchas (already handled, recorded to avoid regressions)
+
+- **No swap by default** → `fallocate -l 2G /swapfile && mkswap && swapon` (+ `/etc/fstab`). Required: MySQL + EMQX + TimescaleDB coexist in 1.6 GB.
+- **Redis healthcheck**: the redis service must declare `environment: REDIS_PASSWORD: ${REDIS_PASSWORD}` or the in-container `$REDIS_PASSWORD` is empty and `redis-cli -a` fails → unhealthy → server never starts.
+- **config.prod.yaml perms**: bind-mounted read-only, server runs as uid `10001` — the host file (root:root 600) needs `chmod 644` or the binary exits `permission denied`.
+- **EMQX `unhealthy` label is a false negative**: `emqx ctl status` flake-times out on the dist protocol; EMQX actually serves MQTT (verified by device auth + telemetry round-trip). Don't chase it.
+- **nginx upstream `host not found`**: only fires while `server` is crash-looping; resolves once server is stably up.
+
+### Redeploy checklist
+
+- **Code change** → local prebuild (Go binary / Vue dist) → upload → `docker compose up -d --build server` (or `web`). Don't run the multi-stage build on this server.
+- **Config change** → edit `/opt/wulianyun/deploy/prod/config.prod.yaml` → `docker compose restart server`.
+- **Logs/status**: `docker compose logs -f server`, `docker compose ps`. `iot-emqx` will show `unhealthy` — ignore (see above); check real MQTT health by publishing as a test device.
