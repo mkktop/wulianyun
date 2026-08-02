@@ -19,21 +19,32 @@ import (
 var client paho.Client
 
 const (
-	TopicUpPrefix   = "thing/up/"        // thing/up/{productKey}/{deviceName}
-	TopicDownPrefix = "thing/down/"      // thing/down/{productKey}/{deviceName}
-	TopicBroadcast  = "thing/broadcast/" // thing/broadcast/{productKey}
+	TopicUpPrefix    = "thing/up/"        // thing/up/{productKey}/{deviceName}
+	TopicDownPrefix  = "thing/down/"      // thing/down/{productKey}/{deviceName}
+	TopicBroadcast   = "thing/broadcast/" // thing/broadcast/{productKey}
+	TopicOffline     = "thing/offline/"   // thing/offline/{productKey}/{deviceName} — LWT 遗嘱
+	TopicGateway     = "thing/gateway/"   // thing/gateway/{pk}/{dn}/sub/{subId}/login|logout
+)
+
+// QoS 级别
+const (
+	QoS0 = 0 // 至多一次（火忘）
+	QoS1 = 1 // 至少一次（默认）
+	QoS2 = 2 // 精确一次（关键指令）
 )
 
 // Start 连接 EMQX，订阅设备上行与系统上下线事件；broker 不可用时后台自动重连
 func Start() {
+	clientID := config.C.MQTT.ClientID
 	opts := paho.NewClientOptions().
 		AddBroker(config.C.MQTT.Broker).
-		SetClientID(config.C.MQTT.ClientID).
+		SetClientID(clientID).
 		SetUsername(config.C.MQTT.Username).
 		SetPassword(config.C.MQTT.Password).
 		SetAutoReconnect(true).
 		SetConnectRetry(true).
 		SetConnectRetryInterval(5 * time.Second).
+		SetCleanSession(false). // 持久会话：重连后补发离线消息
 		SetOnConnectHandler(func(c paho.Client) {
 			slog.Info("mqtt connected", "broker", config.C.MQTT.Broker)
 			subscribe(c)
@@ -66,13 +77,13 @@ func Start() {
 
 func subscribe(c paho.Client) {
 	// 设备遥测上行
-	c.Subscribe(TopicUpPrefix+"#", 1, func(_ paho.Client, m paho.Message) {
+	c.Subscribe(TopicUpPrefix+"#", QoS1, func(_ paho.Client, m paho.Message) {
 		parts := strings.Split(m.Topic(), "/")
 		// thing/up/{productKey}/{deviceName}[/...]
 		if len(parts) < 4 {
 			return
 		}
-		// OTA 进度上报单独分流：thing/up/{pk}/{dn}/ota
+		// OTA 进度上报：thing/up/{pk}/{dn}/ota
 		if len(parts) >= 5 && parts[4] == "ota" {
 			var d model.Device
 			if err := repository.DB.Where("product_key = ? AND name = ?", parts[2], parts[3]).First(&d).Error; err != nil {
@@ -84,11 +95,29 @@ func subscribe(c paho.Client) {
 		go service.HandleTelemetry(parts[2], parts[3], m.Payload())
 	})
 
-	// EMQX 系统事件：上下线
-	c.Subscribe("$SYS/brokers/+/clients/+/connected", 1, func(_ paho.Client, m paho.Message) {
+	// 设备遗嘱消息（LWT）：thing/offline/{pk}/{dn}
+	// 设备连接时声明 LWT，TCP 断开后 EMQX 立即发布遗嘱，后端秒级感知离线
+	c.Subscribe(TopicOffline+"+", QoS1, func(_ paho.Client, m paho.Message) {
+		parts := strings.Split(m.Topic(), "/")
+		// thing/offline/{pk}/{dn}
+		if len(parts) != 4 {
+			return
+		}
+		clientID := parts[2] + "." + parts[3]
+		slog.Info("lwt offline detected", "device", clientID)
+		go service.HandleDeviceStatus(clientID, false)
+	})
+
+	// 子设备网关协议：thing/gateway/{pk}/{dn}/sub/{subId}/login|logout
+	c.Subscribe(TopicGateway+"+/+/sub/+/+", QoS1, func(_ paho.Client, m paho.Message) {
+		go service.HandleGatewaySubDevice(m.Topic(), m.Payload())
+	})
+
+	// EMQX 系统事件：上下线（作为 LWT 的补充，处理 clean disconnect 场景）
+	c.Subscribe("$SYS/brokers/+/clients/+/connected", QoS1, func(_ paho.Client, m paho.Message) {
 		handleSysEvent(m.Payload(), true)
 	})
-	c.Subscribe("$SYS/brokers/+/clients/+/disconnected", 1, func(_ paho.Client, m paho.Message) {
+	c.Subscribe("$SYS/brokers/+/clients/+/disconnected", QoS1, func(_ paho.Client, m paho.Message) {
 		handleSysEvent(m.Payload(), false)
 	})
 }
@@ -108,13 +137,31 @@ func handleSysEvent(payload []byte, online bool) {
 	go service.HandleDeviceStatus(evt.ClientID, online)
 }
 
-// PublishDown 向设备下行主题发布消息
+// PublishDown 向设备下行主题发布消息（QoS 1）
 func PublishDown(productKey, deviceName string, payload []byte) error {
+	return PublishDownWithQoS(productKey, deviceName, payload, QoS1)
+}
+
+// PublishDownWithQoS 向设备下行主题发布消息（指定 QoS）
+func PublishDownWithQoS(productKey, deviceName string, payload []byte, qos int) error {
 	if client == nil || !client.IsConnected() {
 		return fmt.Errorf("mqtt broker 未连接")
 	}
 	topic := TopicDownPrefix + productKey + "/" + deviceName
-	token := client.Publish(topic, 1, false, payload)
+	token := client.Publish(topic, byte(qos), false, payload)
+	if !token.WaitTimeout(5 * time.Second) {
+		return fmt.Errorf("发布超时")
+	}
+	return token.Error()
+}
+
+// PublishDownRetained 发布 Retained 消息（设备上线后从 broker 立即获取最新期望值/配置）
+func PublishDownRetained(productKey, deviceName string, payload []byte) error {
+	if client == nil || !client.IsConnected() {
+		return fmt.Errorf("mqtt broker 未连接")
+	}
+	topic := TopicDownPrefix + productKey + "/" + deviceName + "/retained"
+	token := client.Publish(topic, QoS1, true, payload) // retained=true
 	if !token.WaitTimeout(5 * time.Second) {
 		return fmt.Errorf("发布超时")
 	}
@@ -126,10 +173,33 @@ func PublishBroadcast(productKey string, payload []byte) error {
 	if client == nil || !client.IsConnected() {
 		return fmt.Errorf("mqtt broker 未连接")
 	}
-	token := client.Publish(TopicBroadcast+productKey, 1, false, payload)
+	token := client.Publish(TopicBroadcast+productKey, QoS1, false, payload)
 	if !token.WaitTimeout(5 * time.Second) {
 		return fmt.Errorf("发布超时")
 	}
+	return token.Error()
+}
+
+// PublishGatewayDown 向网关子设备下行主题发布消息
+func PublishGatewayDown(productKey, gatewayName, subDeviceName string, payload []byte) error {
+	if client == nil || !client.IsConnected() {
+		return fmt.Errorf("mqtt broker 未连接")
+	}
+	topic := TopicGateway + productKey + "/" + gatewayName + "/sub/" + subDeviceName
+	token := client.Publish(topic, QoS1, false, payload)
+	if !token.WaitTimeout(5 * time.Second) {
+		return fmt.Errorf("发布超时")
+	}
+	return token.Error()
+}
+
+// ClearRetained 清除指定设备的 Retained 消息（发布空 payload 到 Retained topic）
+func ClearRetained(productKey, deviceName string) error {
+	if client == nil || !client.IsConnected() {
+		return fmt.Errorf("mqtt broker 未连接")
+	}
+	topic := TopicDownPrefix + productKey + "/" + deviceName + "/retained"
+	token := client.Publish(topic, QoS1, true, []byte(""))
 	return token.Error()
 }
 
@@ -144,7 +214,7 @@ func SubscribeReply() {
 		return
 	}
 	topic := "thing/up/+/+/reply"
-	client.Subscribe(topic, 1, func(c paho.Client, msg paho.Message) {
+	client.Subscribe(topic, QoS1, func(c paho.Client, msg paho.Message) {
 		go service.HandleDeviceReply(msg.Topic(), msg.Payload())
 	})
 	slog.Info("subscribed to reply topic", "topic", topic)

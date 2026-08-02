@@ -23,6 +23,7 @@ func NewRouter() *gin.Engine {
 		// 公开接口
 		v1.POST("/auth/register", Register)
 		v1.POST("/auth/login", Login)
+		v1.POST("/auth/token", DeviceToken) // 设备动态获取 MQTT Token
 		v1.POST("/emqx/auth", EmqxAuth) // EMQX 认证回调（内网）
 		v1.POST("/emqx/acl", EmqxACL)   // EMQX 授权回调（内网）
 		v1.POST("/http/telemetry", HTTPDeviceTelemetry) // 设备HTTP上报（Token认证）

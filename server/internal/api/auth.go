@@ -9,6 +9,7 @@ import (
 
 	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
+	"iot-platform/internal/service"
 )
 
 type authReq struct {
@@ -83,4 +84,24 @@ func EnsureAdmin() {
 		hash, _ := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
 		repository.DB.Create(&model.User{Username: "admin", PasswordHash: string(hash), Nickname: "管理员", Role: "admin"})
 	}
+}
+
+// DeviceToken 设备动态获取 MQTT 连接 Token
+// POST /api/v1/auth/token  Body: {"productKey":"...","deviceName":"...","secret":"..."}
+func DeviceToken(c *gin.Context) {
+	var req struct {
+		ProductKey string `json:"productKey" binding:"required"`
+		DeviceName string `json:"deviceName" binding:"required"`
+		Secret     string `json:"secret" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, gin.H{"code": 1, "msg": "参数错误"})
+		return
+	}
+	token, ttl, err := service.GenerateDeviceToken(req.ProductKey, req.DeviceName, req.Secret)
+	if err != nil {
+		c.JSON(200, gin.H{"code": 1, "msg": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": gin.H{"token": token, "ttl": ttl}})
 }

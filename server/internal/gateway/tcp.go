@@ -308,6 +308,8 @@ func handleConn(conn net.Conn) {
 			if OnDeviceDisconnect != nil {
 				OnDeviceDisconnect(productKey, deviceName)
 			}
+			// TCP 断线重连引导：记录断开原因，设备端固件可据此执行指数退避重连
+			writeReconnectGuidance(productKey, deviceName, conn)
 		} else {
 			mu.Unlock()
 		}
@@ -468,4 +470,17 @@ func Request(productKey, deviceName string, reqFrame []byte, timeout time.Durati
 	case <-time.After(timeout):
 		return nil, fmt.Errorf("请求超时")
 	}
+}
+
+// writeReconnectGuidance TCP 断线重连引导：记录断开原因到设备日志
+// 设备端固件建议实现指数退避重连：1s → 2s → 4s → ... → 60s cap
+func writeReconnectGuidance(productKey, deviceName string, conn net.Conn) {
+	reason := "未知"
+	if conn != nil {
+		if conn.RemoteAddr() != nil {
+			reason = "远程断开: " + conn.RemoteAddr().String()
+		}
+	}
+	// 写入设备日志，前端在设备详情页可看到断连记录
+	go service.LogTCPDisconnect(productKey, deviceName, reason)
 }

@@ -76,6 +76,16 @@ func LogCommand(productKey, deviceName, channel string, payload []byte, sendErr 
 	writeDeviceLog(d.UserID, d.ID, d.Name, logCategory, logSummary, string(payload), "")
 }
 
+// LogTCPDisconnect 记录 TCP 设备断连事件（含重连引导信息）
+func LogTCPDisconnect(productKey, deviceName, reason string) {
+	d, err := FindDevice(productKey, deviceName)
+	if err != nil {
+		return
+	}
+	writeDeviceLog(d.UserID, d.ID, d.Name, "connection",
+		"TCP 断开("+reason+")，设备将自动重连", "", "")
+}
+
 // Broadcaster 由 main 注入：向产品下所有设备广播（MQTT 广播主题 + TCP 逐连接）
 var Broadcaster func(productKey string, payload []byte) error
 

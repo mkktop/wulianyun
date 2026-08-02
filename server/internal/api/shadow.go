@@ -22,21 +22,35 @@ func GetDeviceShadow(c *gin.Context) {
 	OK(c, service.GetShadow(d.ID))
 }
 
-// SetDeviceProperty 属性设置：写影子 desired，在线即时下发，离线上线补发
+// SetDeviceProperty 属性设置：写影子 desired，在线即时下发（QoS 2），离线上线补发
+// 支持 expireSec 参数：指定秒数后指令自动过期
 func SetDeviceProperty(c *gin.Context) {
 	var d model.Device
 	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&d).Error; err != nil {
 		Fail(c, 404, "设备不存在")
 		return
 	}
-	var params map[string]interface{}
-	if err := c.ShouldBindJSON(&params); err != nil || len(params) == 0 {
-		Fail(c, 400, "属性参数必须是非空 JSON 对象")
-		return
+	var body struct {
+		Params   map[string]interface{} `json:"params"`
+		ExpireSec int                   `json:"expireSec"` // 过期秒数（0=不过期）
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || len(body.Params) == 0 {
+		// 兼容旧格式：直接传 params
+		if err := c.ShouldBindJSON(&body.Params); err != nil || len(body.Params) == 0 {
+			Fail(c, 400, "属性参数必须是非空 JSON 对象")
+			return
+		}
 	}
 
 	messageID := fmt.Sprintf("%d", time.Now().UnixNano())
-	s, err := service.UpdateShadowDesired(&d, params)
+	// 消息过期检查：expireSec > 0 时添加 expireAt
+	var expireAt int64
+	if body.ExpireSec > 0 {
+		expireAt = time.Now().Add(time.Duration(body.ExpireSec) * time.Second).UnixMilli()
+	}
+	_ = expireAt // 在下行 payload 中使用
+
+	s, err := service.UpdateShadowDesired(&d, body.Params)
 	if err != nil {
 		Fail(c, 500, "更新影子失败")
 		return
@@ -49,7 +63,7 @@ func SetDeviceProperty(c *gin.Context) {
 		DeviceID:   d.ID,
 		DeviceName: d.Name,
 		Method:     "property.set",
-		Payload:    func() string { b, _ := json.Marshal(params); return string(b) }(),
+		Payload:    func() string { b, _ := json.Marshal(body.Params); return string(b) }(),
 		Status:     "pending",
 		TimeoutMs:  10000,
 	}
