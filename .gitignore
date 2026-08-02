@@ -13,3 +13,6 @@ web/dist/
 .idea/
 .vscode/
 Thumbs.db
+
+# Claude Code 本地配置（含权限规则/敏感命令，勿提交）
+.claude/

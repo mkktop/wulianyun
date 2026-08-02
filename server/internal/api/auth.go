@@ -7,6 +7,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"iot-platform/internal/config"
 	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
 	"iot-platform/internal/service"
@@ -76,12 +77,17 @@ func Profile(c *gin.Context) {
 	OK(c, user)
 }
 
-// EnsureAdmin 初始化默认管理员 admin/admin123
+// EnsureAdmin 初始化默认管理员；首次无 admin 用户时生效一次。
+// 密码取 config.C.AdminPassword，为空则回退默认 admin123。
 func EnsureAdmin() {
 	var cnt int64
 	repository.DB.Model(&model.User{}).Where("username = ?", "admin").Count(&cnt)
 	if cnt == 0 {
-		hash, _ := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
+		pwd := config.C.AdminPassword
+		if pwd == "" {
+			pwd = "admin123"
+		}
+		hash, _ := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
 		repository.DB.Create(&model.User{Username: "admin", PasswordHash: string(hash), Nickname: "管理员", Role: "admin"})
 	}
 }

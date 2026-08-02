@@ -137,5 +137,8 @@ func NewRouter() *gin.Engine {
 		open.POST("/devices/:id/property", SetDeviceProperty)
 		open.POST("/devices/:id/command", SendCommand)
 	}
+	// 静态资源：OTA 固件下载（fileURL 形如 /uploads/firmware/...）；文件名含时间戳+产品ID随机化
+	r.Static("/uploads", "./uploads")
+
 	return r
 }

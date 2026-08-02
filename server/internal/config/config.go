@@ -26,6 +26,8 @@ type Config struct {
 		Secret      string `yaml:"secret"`
 		ExpireHours int    `yaml:"expire_hours"`
 	} `yaml:"jwt"`
+	// AdminPassword 首次启动创建 admin 用户的密码；为空时回退默认 admin123（仅首次无 admin 时生效）
+	AdminPassword string `yaml:"admin_password"`
 	Database struct {
 		DSN               string `yaml:"dsn"`
 		MaxOpenConns      int    `yaml:"max_open_conns"`

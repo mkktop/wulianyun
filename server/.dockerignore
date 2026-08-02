@@ -1,0 +1,12 @@
+bin/
+*.exe
+server.exe
+deploy/
+.tools/
+.git/
+.gitignore
+Dockerfile
+.dockerignore
+*_test.go
+internal/gateway/*_test.go
+internal/modbus/*_test.go
