@@ -1,21 +1,24 @@
 // Package gateway TCP 透传接入网关（对标有人云 DTU 场景）
 //
 // 接入流程：
-//  1. 设备连接后 10 秒内发送注册包：{productKey},{deviceName},{secret}\n
+//  1. 设备连接后 10 秒内发送注册包：三元组 {productKey},{deviceName},{secret}\n
+//     或自定义注册码（单行，匹配设备 RegCode，如 IMEI/ICCID）
 //  2. 鉴权通过回复 OK\n，失败回复 ERR\n 并断开
-//  3. 之后透传数据：产品配置了解析脚本则按脚本 decode，否则按 JSON 解析
-//  4. "PING" 心跳回复 "PONG"；空闲超时断开并置离线
+//  3. 之后按产品组帧配置切分数据帧：脚本 decode 或 JSON 解析
+//  4. 心跳（默认 "PING"→"PONG"，或产品自定义）；空闲超时断开并置离线
 package gateway
 
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"iot-platform/internal/codec"
@@ -31,18 +34,26 @@ type session struct {
 	deviceName string
 	productID  uint
 
-	// Modbus 请求-响应：有待响应请求时，收到的帧路由到 waitCh
-	mu     sync.Mutex
-	waitCh chan []byte
+	fr       *framer // 组帧器（鉴权后按产品配置构造）
+	hbPacket []byte  // 自定义心跳请求（空=默认 PING）
+	hbReply  []byte  // 自定义心跳应答（空=默认 PONG）
+
+	// Modbus 请求-响应：有待响应请求时，匹配的帧路由到 waitCh
+	mu       sync.Mutex
+	waitCh   chan []byte
+	expSlave byte // 期望应答的从机地址
+	expFunc  byte // 期望应答的功能码
 	// reqMu 串行化同一连接上的请求-响应（Modbus 半双工，多采集组/写操作并发时必须排队）
 	reqMu  sync.Mutex
 }
 
-// setWait 开启一次等待响应；返回接收通道与清理函数
-func (s *session) setWait() (chan []byte, func()) {
+// setWait 开启一次等待响应；记录期望的从机地址/功能码用于应答匹配
+func (s *session) setWait(slave, fn byte) (chan []byte, func()) {
 	ch := make(chan []byte, 1)
 	s.mu.Lock()
 	s.waitCh = ch
+	s.expSlave = slave
+	s.expFunc = fn
 	s.mu.Unlock()
 	return ch, func() {
 		s.mu.Lock()
@@ -53,12 +64,19 @@ func (s *session) setWait() (chan []byte, func()) {
 	}
 }
 
-// deliver 尝试把收到的帧投递给等待中的请求；返回 true 表示已消费
+// deliver 尝试把收到的帧投递给等待中的请求；仅当从机地址与功能码匹配时消费
+// 返回 true 表示已消费（不再作为普通上行处理）
 func (s *session) deliver(data []byte) bool {
 	s.mu.Lock()
 	ch := s.waitCh
+	slave, fn := s.expSlave, s.expFunc
 	s.mu.Unlock()
 	if ch == nil {
+		return false
+	}
+	// 校验应答与请求匹配：从机地址一致，功能码一致或对应异常码(fn|0x80)
+	// 不匹配的帧（迟到应答/主动帧）不消费，交由普通上行处理
+	if len(data) >= 2 && (data[0] != slave || (data[1] != fn && data[1] != fn|0x80)) {
 		return false
 	}
 	buf := make([]byte, len(data))
@@ -68,6 +86,71 @@ func (s *session) deliver(data []byte) bool {
 	default:
 	}
 	return true
+}
+
+var ipConnCount sync.Map // ip string -> *int64 (atomic counter)
+
+func getIPCounter(ip string) *int64 {
+	if v, ok := ipConnCount.Load(ip); ok {
+		return v.(*int64)
+	}
+	var counter int64
+	actual, _ := ipConnCount.LoadOrStore(ip, &counter)
+	return actual.(*int64)
+}
+
+type tokenBucket struct {
+	tokens   float64
+	capacity float64
+	rate     float64 // tokens per second
+	lastFill time.Time
+	mu       sync.Mutex
+}
+
+func (b *tokenBucket) allow() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now()
+	elapsed := now.Sub(b.lastFill).Seconds()
+	b.tokens += elapsed * b.rate
+	if b.tokens > b.capacity {
+		b.tokens = b.capacity
+	}
+	b.lastFill = now
+	if b.tokens >= 1 {
+		b.tokens--
+		return true
+	}
+	return false
+}
+
+var (
+	rateLimiterMu sync.Mutex
+	rateLimiters  = make(map[string]*tokenBucket)
+)
+
+func getRateLimiter(ip string) *tokenBucket {
+	rateLimiterMu.Lock()
+	defer rateLimiterMu.Unlock()
+	if lb, ok := rateLimiters[ip]; ok {
+		return lb
+	}
+	rate := float64(config.C.Gateway.ConnRateLimit)
+	if rate <= 0 {
+		rate = 5
+	}
+	capacity := float64(config.C.Gateway.ConnRateBurst)
+	if capacity <= 0 {
+		capacity = 10
+	}
+	lb := &tokenBucket{
+		tokens:   capacity,
+		capacity: capacity,
+		rate:     rate,
+		lastFill: time.Now(),
+	}
+	rateLimiters[ip] = lb
+	return lb
 }
 
 var (
@@ -92,18 +175,47 @@ func Start() {
 	if addr == "" {
 		return
 	}
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		slog.Error("tcp gateway listen failed", "addr", addr, "err", err)
-		return
+	var ln net.Listener
+	if config.C.Gateway.TLS.Enabled {
+		cert, err := tls.LoadX509KeyPair(config.C.Gateway.TLS.CertFile, config.C.Gateway.TLS.KeyFile)
+		if err != nil {
+			slog.Error("load gateway tls cert failed", "error", err)
+			return
+		}
+		tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
+		ln, err = tls.Listen("tcp", addr, tlsConfig)
+		if err != nil {
+			slog.Error("tls listen failed", "error", err)
+			return
+		}
+		slog.Info("tls tcp gateway started", "addr", addr)
+	} else {
+		var err error
+		ln, err = net.Listen("tcp", addr)
+		if err != nil {
+			slog.Error("tcp gateway listen failed", "addr", addr, "err", err)
+			return
+		}
+		slog.Info("tcp gateway started", "addr", addr)
 	}
-	slog.Info("tcp gateway started", "addr", addr)
 	go func() {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
 				slog.Warn("tcp accept failed", "err", err)
 				continue
+			}
+			remoteIP := ""
+			if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+				remoteIP = addr.IP.String()
+			}
+			if remoteIP != "" {
+				lb := getRateLimiter(remoteIP)
+				if !lb.allow() {
+					conn.Close()
+					slog.Warn("conn rate limited", "ip", remoteIP)
+					continue
+				}
 			}
 			go handleConn(conn)
 		}
@@ -113,6 +225,26 @@ func Start() {
 func handleConn(conn net.Conn) {
 	defer conn.Close()
 
+	remoteIP := ""
+	if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+		remoteIP = addr.IP.String()
+	}
+	if remoteIP == "" {
+		return
+	}
+
+	counter := getIPCounter(remoteIP)
+	maxConns := int64(config.C.Gateway.MaxConnsPerIP)
+	if maxConns <= 0 {
+		maxConns = 10
+	}
+	if atomic.AddInt64(counter, 1) > maxConns {
+		atomic.AddInt64(counter, -1)
+		slog.Warn("ip connection limit exceeded", "ip", remoteIP, "max", maxConns)
+		return
+	}
+	defer atomic.AddInt64(counter, -1)
+
 	// 注册包鉴权
 	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	reader := bufio.NewReaderSize(conn, 1024)
@@ -121,20 +253,36 @@ func handleConn(conn net.Conn) {
 		return
 	}
 	parts := strings.Split(strings.TrimSpace(line), ",")
-	if len(parts) != 3 {
+	raw := strings.TrimSpace(line)
+	var d *model.Device
+	if len(parts) == 3 {
+		d, err = service.FindDeviceForAuth(parts[0], parts[1], parts[2])
+	} else if raw != "" {
+		d, err = service.FindDeviceByRegCode(raw) // 自定义注册码（IMEI/ICCID 等）
+	} else {
 		conn.Write([]byte("ERR\n"))
 		return
 	}
-	productKey, deviceName, secret := parts[0], parts[1], parts[2]
-	d, err := service.FindDeviceForAuth(productKey, deviceName, secret)
-	if err != nil || d.Status == model.DeviceStatusDisabled {
+	if err != nil || d == nil || d.Status == model.DeviceStatusDisabled {
 		conn.Write([]byte("ERR\n"))
 		return
 	}
 	conn.Write([]byte("OK\n"))
 
+	productKey, deviceName := d.ProductKey, d.Name
 	key := productKey + "." + deviceName
-	s := &session{conn: conn, productKey: productKey, deviceName: deviceName, productID: d.ProductID}
+
+	// 加载产品组帧/心跳配置
+	var p model.Product
+	if err := repository.DB.First(&p, d.ProductID).Error; err != nil {
+		return
+	}
+	s := &session{
+		conn: conn, productKey: productKey, deviceName: deviceName, productID: d.ProductID,
+		fr:       newFramer(&p),
+		hbPacket: parseBytes(p.HeartbeatPacket),
+		hbReply:  parseBytes(p.HeartbeatReply),
+	}
 
 	// 同设备重复连接：踢掉旧连接
 	mu.Lock()
@@ -166,7 +314,7 @@ func handleConn(conn net.Conn) {
 		slog.Info("dtu disconnected", "device", key)
 	}()
 
-	// 数据循环
+	// 数据循环：按产品组帧配置切分完整帧
 	buf := make([]byte, 4096)
 	for {
 		conn.SetReadDeadline(time.Now().Add(idleTimeout()))
@@ -174,21 +322,53 @@ func handleConn(conn net.Conn) {
 		if err != nil {
 			return
 		}
-		// Modbus 请求-响应：有等待中的请求时，投递原始二进制帧（不裁剪）
-		if s.deliver(buf[:n]) {
-			continue
+		s.fr.append(buf[:n])
+		for {
+			frame, ok := s.fr.next()
+			if !ok {
+				break
+			}
+			s.handleFrame(frame)
 		}
-		data := bytes.TrimRight(buf[:n], "\r\n")
-		if len(data) == 0 {
-			continue
-		}
-		// 心跳
-		if bytes.Equal(data, []byte("PING")) {
-			conn.Write([]byte("PONG\n"))
-			continue
-		}
-		handleUplink(s, data)
 	}
+}
+
+// handleFrame 处理一个完整帧：Modbus 应答投递 / 心跳 / 普通上行
+func (s *session) handleFrame(frame []byte) {
+	// Modbus 请求-响应：投递给等待者（framer 已保证完整且 CRC 通过）
+	if s.deliver(frame) {
+		return
+	}
+	data := bytes.TrimRight(frame, "\r\n")
+	if len(data) == 0 {
+		return
+	}
+	// 心跳
+	if s.isHeartbeat(data) {
+		s.replyHeartbeat()
+		return
+	}
+	handleUplink(s, data)
+}
+
+// isHeartbeat 判断是否心跳帧（产品自定义优先，否则默认 PING）
+func (s *session) isHeartbeat(data []byte) bool {
+	if len(s.hbPacket) > 0 {
+		return bytes.Equal(data, s.hbPacket)
+	}
+	return bytes.Equal(data, []byte("PING"))
+}
+
+// replyHeartbeat 回复心跳（自定义心跳未配回复则不回）
+func (s *session) replyHeartbeat() {
+	s.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if len(s.hbPacket) > 0 {
+		if len(s.hbReply) > 0 {
+			s.conn.Write(s.hbReply)
+		}
+		return
+	}
+	s.conn.Write([]byte("PONG\n"))
 }
 
 // handleUplink 上行数据：优先脚本解析，其次尝试 JSON
@@ -245,6 +425,20 @@ func Send(productKey, deviceName string, payload []byte) error {
 	return err
 }
 
+// Broadcast 向某产品下所有在线 TCP 设备下发原始 payload（用于广播/配置下发）
+func Broadcast(productKey string, payload []byte) {
+	mu.RLock()
+	defer mu.RUnlock()
+	prefix := productKey + "."
+	for key, s := range sessions {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		s.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		s.conn.Write(payload)
+	}
+}
+
 // Request 发送请求帧并等待应答（Modbus 半双工请求-响应），带超时；同一连接上串行执行
 func Request(productKey, deviceName string, reqFrame []byte, timeout time.Duration) ([]byte, error) {
 	mu.RLock()
@@ -257,7 +451,11 @@ func Request(productKey, deviceName string, reqFrame []byte, timeout time.Durati
 	s.reqMu.Lock()
 	defer s.reqMu.Unlock()
 
-	ch, cleanup := s.setWait()
+	var slave, fn byte
+	if len(reqFrame) >= 2 {
+		slave, fn = reqFrame[0], reqFrame[1]
+	}
+	ch, cleanup := s.setWait(slave, fn)
 	defer cleanup()
 
 	s.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))

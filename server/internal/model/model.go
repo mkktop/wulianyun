@@ -36,6 +36,13 @@ const (
 	SecretModeProduct = "product" // 一型一密
 )
 
+// TCP 组帧模式（透传/自定义协议产品）
+const (
+	FrameModeNone      = "none"      // 不组帧：每次读取视为一帧（兼容旧行为）
+	FrameModeDelimiter = "delimiter" // 定界符分帧
+	FrameModeLength    = "length"    // 长度字段分帧
+)
+
 type Product struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
 	UserID      uint      `gorm:"index;not null" json:"userId"`
@@ -49,6 +56,22 @@ type Product struct {
 	PollInterval  int     `gorm:"default:60" json:"pollInterval"`               // Modbus 采集周期(秒)
 	CodecScript string    `gorm:"type:text" json:"codecScript"` // 自定义协议解析脚本(JS)
 	Description string    `gorm:"size:255" json:"description"`
+
+	// TCP 组帧配置（Modbus 产品固定按 RTU 帧组帧，无需配置）
+	FrameMode      string `gorm:"size:16;default:none" json:"frameMode"` // none/delimiter/length
+	FrameDelimiter string `gorm:"size:32" json:"frameDelimiter"`         // 定界符(HEX，如 0D0A)
+	FrameLenOffset int    `gorm:"default:0" json:"frameLenOffset"`       // 长度字段字节偏移
+	FrameLenSize   int    `gorm:"default:1" json:"frameLenSize"`         // 长度字段字节数(1/2，2 为大端)
+	FrameLenAdjust int    `gorm:"default:0" json:"frameLenAdjust"`       // 帧总长 = 长度值 + 调整值
+
+	// TCP 自定义心跳（空 = 默认 PING/PONG；内容支持文本或 0x 开头 HEX）
+	HeartbeatPacket string `gorm:"size:128" json:"heartbeatPacket"`
+	HeartbeatReply  string `gorm:"size:128" json:"heartbeatReply"`
+
+	// 远程配置（config.get / config.push 下发内容）
+	RemoteConfig  datatypes.JSON `gorm:"type:jsonb;default:'{}'" json:"remoteConfig"`
+	ConfigVersion int            `gorm:"default:0" json:"configVersion"`
+
 	CreatedAt   time.Time `json:"createdAt"`
 
 	DeviceCount int64 `gorm:"-" json:"deviceCount"`
@@ -61,8 +84,11 @@ type Device struct {
 	ProductKey    string     `gorm:"size:32;not null;uniqueIndex:idx_product_device,priority:1" json:"productKey"`
 	Name          string     `gorm:"size:64;not null;uniqueIndex:idx_product_device,priority:2" json:"name"`
 	Secret        string     `gorm:"size:64;not null" json:"secret"`
+	RegCode       string     `gorm:"size:64;index" json:"regCode"` // TCP 自定义注册码(IMEI/ICCID 等)，非空时可免三元组注册
 	Status        string     `gorm:"size:16;default:inactive;index" json:"status"`
 	GroupID       uint       `gorm:"index;default:0" json:"groupId"`             // 设备分组（0=未分组）
+	GatewayID     *uint      `gorm:"index" json:"gatewayId,omitempty"`
+	IsGateway     bool       `gorm:"default:false" json:"isGateway"`
 	Tags          datatypes.JSON `gorm:"type:jsonb;default:'[]'" json:"tags"`     // 标签数组
 	Remark        string     `gorm:"size:255" json:"remark"`
 	LastOnlineAt  *time.Time `json:"lastOnlineAt"`
@@ -75,11 +101,13 @@ type Device struct {
 
 // Telemetry 遥测数据（TimescaleDB 超表，无主键）
 type Telemetry struct {
-	Ts         time.Time      `gorm:"index:idx_dev_ts,priority:2,sort:desc;not null" json:"ts"`
-	DeviceID   uint           `gorm:"index:idx_dev_ts,priority:1;not null" json:"deviceId"`
-	ProductKey string         `gorm:"size:32" json:"productKey"`
-	DeviceName string         `gorm:"size:64" json:"deviceName"`
-	Data       datatypes.JSON `gorm:"type:jsonb" json:"data"`
+	Ts               time.Time      `gorm:"index:idx_dev_ts,priority:2,sort:desc;not null" json:"ts"`
+	DeviceID         uint           `gorm:"index:idx_dev_ts,priority:1;not null" json:"deviceId"`
+	ProductKey       string         `gorm:"size:32" json:"productKey"`
+	DeviceName       string         `gorm:"size:64" json:"deviceName"`
+	Data             datatypes.JSON `gorm:"type:jsonb" json:"data"`
+	Valid            bool           `gorm:"default:true" json:"valid"`
+	ValidationErrors datatypes.JSON `gorm:"type:jsonb" json:"validationErrors,omitempty"`
 }
 
 // DeviceEvent 设备上下线等事件日志

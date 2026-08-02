@@ -80,6 +80,9 @@
       <el-form-item label="设备名称" required>
         <el-input v-model="form.name" placeholder="产品内唯一，如 sensor-001" />
       </el-form-item>
+      <el-form-item label="注册码" v-if="isTcpProduct(form.productId)">
+        <el-input v-model="form.regCode" placeholder="选填，IMEI/ICCID 等，TCP 设备可凭注册码免三元组接入" />
+      </el-form-item>
       <el-form-item label="备注">
         <el-input v-model="form.remark" />
       </el-form-item>
@@ -107,6 +110,9 @@
           <el-tag v-for="(t, i) in editForm.tags" :key="t" closable @close="editForm.tags.splice(i, 1)">{{ t }}</el-tag>
           <el-input v-model="newTag" size="small" style="width: 100px" placeholder="+标签" @keyup.enter="addTag" @blur="addTag" />
         </div>
+      </el-form-item>
+      <el-form-item label="注册码" v-if="isTcpProduct(editing?.productId)">
+        <el-input v-model="editForm.regCode" placeholder="选填，IMEI/ICCID 等" />
       </el-form-item>
       <el-form-item label="备注">
         <el-input v-model="editForm.remark" />
@@ -159,15 +165,21 @@ const groupId = ref('')
 const loading = ref(false)
 const dialogVisible = ref(false)
 const saving = ref(false)
-const form = reactive<{ productId: number | null; name: string; remark: string }>({
-  productId: null, name: '', remark: ''
+const form = reactive<{ productId: number | null; name: string; remark: string; regCode: string }>({
+  productId: null, name: '', remark: '', regCode: ''
 })
 
 // 编辑设备
 const editVisible = ref(false)
 const editing = ref<Device | null>(null)
-const editForm = reactive<{ groupId: number; tags: string[]; remark: string }>({ groupId: 0, tags: [], remark: '' })
+const editForm = reactive<{ groupId: number; tags: string[]; remark: string; regCode: string }>({ groupId: 0, tags: [], remark: '', regCode: '' })
 const newTag = ref('')
+
+// 是否 TCP 接入产品（注册码仅对 TCP 设备有意义）
+function isTcpProduct(pid?: number | null) {
+  if (!pid) return false
+  return products.value.find((p) => p.id === pid)?.protocol === 'tcp'
+}
 
 // 分组管理
 const groupMgrVisible = ref(false)
@@ -184,6 +196,7 @@ function openEdit(row: Device) {
   editForm.groupId = row.groupId || 0
   editForm.tags = [...parseTags(row.tags)]
   editForm.remark = row.remark
+  editForm.regCode = row.regCode || ''
   newTag.value = ''
   editVisible.value = true
 }
@@ -198,7 +211,7 @@ async function saveEdit() {
   saving.value = true
   try {
     await api.updateDevice(editing.value!.id, {
-      remark: editForm.remark, groupId: editForm.groupId, tags: editForm.tags
+      remark: editForm.remark, groupId: editForm.groupId, tags: editForm.tags, regCode: editForm.regCode
     })
     ElMessage.success('已保存')
     editVisible.value = false
@@ -257,6 +270,7 @@ async function save() {
     dialogVisible.value = false
     form.name = ''
     form.remark = ''
+    form.regCode = ''
     load()
   } finally {
     saving.value = false

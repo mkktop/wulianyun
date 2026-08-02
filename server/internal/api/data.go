@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"math"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -128,11 +129,36 @@ func Overview(c *gin.Context) {
 		WHERE d.user_id = ? AND t.ts >= ?
 		GROUP BY 1 ORDER BY 1`, uid, today.AddDate(0, 0, -6)).Scan(&trend)
 
+	// 设备在线率
+	onlineRate := 0.0
+	if deviceCount > 0 {
+		onlineRate = float64(onlineCount) / float64(deviceCount) * 100
+	}
+
+	// 最近一小时平均每分钟消息量（吞吐量指标）
+	oneHourAgo := time.Now().Add(-time.Hour)
+	var msgLastHour int64
+	repository.DB.Model(&model.Telemetry{}).
+		Joins("JOIN devices ON devices.id = telemetries.device_id").
+		Where("devices.user_id = ? AND telemetries.ts >= ?", uid, oneHourAgo).
+		Count(&msgLastHour)
+	msgRateMin := msgLastHour / 60 // 每分钟平均
+
+	// 总消息量
+	var msgTotal int64
+	repository.DB.Model(&model.Telemetry{}).
+		Joins("JOIN devices ON devices.id = telemetries.device_id").
+		Where("devices.user_id = ?", uid).
+		Count(&msgTotal)
+
 	OK(c, gin.H{
 		"productCount": productCount,
 		"deviceCount":  deviceCount,
 		"onlineCount":  onlineCount,
+		"onlineRate":   math.Round(onlineRate*10) / 10, // 保留一位小数
 		"msgToday":     msgToday,
+		"msgTotal":     msgTotal,
+		"msgRateMin":   msgRateMin,
 		"msgTrend":     trend,
 		"statusDist":   statusDist,
 	})

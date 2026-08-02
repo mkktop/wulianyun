@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -14,6 +15,10 @@ var DownPublisher func(productKey, deviceName string, payload []byte) error
 
 // GetShadow 获取设备影子（无则初始化）
 func GetShadow(deviceID uint) *model.DeviceShadow {
+	if s := CachedGetShadow(deviceID); s != nil {
+		return s
+	}
+	// 缓存未命中，从 DB 加载并初始化
 	var s model.DeviceShadow
 	if err := repository.DB.Where("device_id = ?", deviceID).First(&s).Error; err != nil {
 		s = model.DeviceShadow{DeviceID: deviceID, Desired: []byte("{}"), Reported: []byte("{}")}
@@ -22,30 +27,109 @@ func GetShadow(deviceID uint) *model.DeviceShadow {
 	return &s
 }
 
-// UpdateShadowDesired 合并期望值；设备在线立即下发，离线等上线补发
+// UpdateShadowDesired 合并期望值；设备在线立即下发 delta，离线等上线补发
 func UpdateShadowDesired(d *model.Device, desired map[string]interface{}) (*model.DeviceShadow, error) {
-	s := GetShadow(d.ID)
+	entry := getShadowEntry(d.ID)
+	if entry == nil {
+		// fallback: 直接查 DB
+		s := GetShadow(d.ID)
+		oldDesired := map[string]interface{}{}
+		if len(s.Desired) > 0 {
+			json.Unmarshal(s.Desired, &oldDesired)
+		}
+		merged := map[string]interface{}{}
+		json.Unmarshal(s.Desired, &merged)
+		for k, v := range desired {
+			merged[k] = v
+		}
+		data, _ := json.Marshal(merged)
+		repository.DB.Model(s).Updates(map[string]interface{}{
+			"desired": data, "version": s.Version + 1,
+		})
+		s.Desired = data
+		s.Version++
+		if d.Status == model.DeviceStatusOnline {
+			delta := computeDelta(oldDesired, merged)
+			if len(delta) > 0 {
+				pushDesired(d, delta)
+			}
+		}
+		return s, nil
+	}
+
+	entry.mu.Lock()
+	s := entry.shadow
+	oldDesired := map[string]interface{}{}
+	if len(s.Desired) > 0 {
+		json.Unmarshal(s.Desired, &oldDesired)
+	}
 	merged := map[string]interface{}{}
 	json.Unmarshal(s.Desired, &merged)
 	for k, v := range desired {
 		merged[k] = v
 	}
 	data, _ := json.Marshal(merged)
-	repository.DB.Model(s).Updates(map[string]interface{}{
-		"desired": data, "version": s.Version + 1,
-	})
 	s.Desired = data
 	s.Version++
+	entry.dirty = true
+	entry.mu.Unlock()
+
+	// 立即刷盘（不等定时 flush）
+	shadowFlushAll()
 
 	if d.Status == model.DeviceStatusOnline {
-		pushDesired(d, merged)
+		delta := computeDelta(oldDesired, merged)
+		if len(delta) > 0 {
+			pushDesired(d, delta)
+		}
 	}
 	return s, nil
 }
 
+// computeDelta 计算 old vs new 的差异，仅返回变化或新增的项
+func computeDelta(oldDesired, newDesired map[string]interface{}) map[string]interface{} {
+	delta := map[string]interface{}{}
+	for k, v := range newDesired {
+		oldV, exists := oldDesired[k]
+		if !exists || fmt.Sprintf("%v", oldV) != fmt.Sprintf("%v", v) {
+			delta[k] = v
+		}
+	}
+	return delta
+}
+
 // mergeShadowReported 上行遥测同步到影子 reported，并清除已达成的 desired
 func mergeShadowReported(d *model.Device, data map[string]interface{}) {
-	s := GetShadow(d.ID)
+	entry := getShadowEntry(d.ID)
+	if entry == nil {
+		// fallback: 直接走 DB
+		s := GetShadow(d.ID)
+		reported := map[string]interface{}{}
+		json.Unmarshal(s.Reported, &reported)
+		for k, v := range data {
+			reported[k] = v
+		}
+		desired := map[string]interface{}{}
+		json.Unmarshal(s.Desired, &desired)
+		changed := false
+		for k, dv := range desired {
+			if rv, ok := data[k]; ok && jsonEqual(rv, dv) {
+				delete(desired, k)
+				changed = true
+			}
+		}
+		rb, _ := json.Marshal(reported)
+		updates := map[string]interface{}{"reported": rb}
+		if changed {
+			db, _ := json.Marshal(desired)
+			updates["desired"] = db
+		}
+		repository.DB.Model(s).Updates(updates)
+		return
+	}
+
+	entry.mu.Lock()
+	s := entry.shadow
 	reported := map[string]interface{}{}
 	json.Unmarshal(s.Reported, &reported)
 	for k, v := range data {
@@ -62,12 +146,13 @@ func mergeShadowReported(d *model.Device, data map[string]interface{}) {
 		}
 	}
 	rb, _ := json.Marshal(reported)
-	updates := map[string]interface{}{"reported": rb}
+	s.Reported = rb
 	if changed {
 		db, _ := json.Marshal(desired)
-		updates["desired"] = db
+		s.Desired = db
 	}
-	repository.DB.Model(s).Updates(updates)
+	entry.dirty = true
+	entry.mu.Unlock()
 }
 
 // syncShadowOnConnect 设备上线时补发未达成的期望值
@@ -87,6 +172,7 @@ func pushDesired(d *model.Device, desired map[string]interface{}) {
 	msg, _ := json.Marshal(map[string]interface{}{
 		"method": "property.set",
 		"params": desired,
+		"delta":  true,
 		"ts":     time.Now().UnixMilli(),
 	})
 	if err := DownPublisher(d.ProductKey, d.Name, msg); err != nil {

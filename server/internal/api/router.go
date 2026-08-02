@@ -23,7 +23,9 @@ func NewRouter() *gin.Engine {
 		// 公开接口
 		v1.POST("/auth/register", Register)
 		v1.POST("/auth/login", Login)
-		v1.POST("/emqx/auth", EmqxAuth) // EMQX 回调（内网）
+		v1.POST("/emqx/auth", EmqxAuth) // EMQX 认证回调（内网）
+		v1.POST("/emqx/acl", EmqxACL)   // EMQX 授权回调（内网）
+		v1.POST("/http/telemetry", HTTPDeviceTelemetry) // 设备HTTP上报（Token认证）
 
 		// 需登录
 		auth := v1.Group("", JWTAuth())
@@ -39,6 +41,8 @@ func NewRouter() *gin.Engine {
 			auth.DELETE("/products/:id", DeleteProduct)
 			auth.GET("/products/:id/thing-model", GetThingModel)
 			auth.PUT("/products/:id/thing-model", SaveThingModel)
+			auth.GET("/products/:id/tsl/export", ExportThingModel)
+			auth.POST("/products/:id/tsl/import", ImportThingModel)
 			auth.GET("/products/:id/codec", GetCodec)
 			auth.PUT("/products/:id/codec", SaveCodec)
 			auth.POST("/products/:id/codec/test", TestCodec)
@@ -50,6 +54,11 @@ func NewRouter() *gin.Engine {
 			auth.PUT("/products/:id/modbus-groups/:gid", UpdateModbusGroup)
 			auth.DELETE("/products/:id/modbus-groups/:gid", DeleteModbusGroup)
 			auth.GET("/products/:id/stats", ProductStats)
+			auth.GET("/products/:id/device-alarm-stats", DeviceAlarmStats)
+			auth.GET("/products/:id/config", GetRemoteConfig)
+			auth.PUT("/products/:id/config", SaveRemoteConfig)
+			auth.POST("/products/:id/config/push", PushRemoteConfig)
+			auth.POST("/products/:id/broadcast", BroadcastProduct)
 			auth.POST("/products/:id/devices/batch", BatchCreateDevices)
 
 			auth.POST("/devices", CreateDevice)
@@ -72,7 +81,9 @@ func NewRouter() *gin.Engine {
 
 			auth.GET("/alarms", ListAlarms)
 			auth.POST("/alarms/:id/resolve", ResolveAlarm)
+			auth.POST("/alarms/:id/confirm", ConfirmAlarm)
 			auth.GET("/alarms/stats", AlarmStats)
+			auth.GET("/alarms/trend", AlarmTrend)
 
 			auth.POST("/apps", CreateOpenApp)
 			auth.GET("/apps", ListOpenApps)
@@ -86,6 +97,31 @@ func NewRouter() *gin.Engine {
 			auth.GET("/groups", ListGroups)
 			auth.PUT("/groups/:id", UpdateGroup)
 			auth.DELETE("/groups/:id", DeleteGroup)
+
+			// 开发者工具
+			sim := auth.Group("/simulator")
+			sim.POST("/connect", ConnectSimulator)
+			sim.POST("/publish", PublishSimulator)
+			sim.POST("/disconnect", DisconnectSimulator)
+			sim.GET("/sessions", ListSimulatorSessions)
+
+			auth.GET("/mqtt-debug/ws", MqttDebugWS)
+
+			auth.GET("/traces", ListTraces)
+			auth.GET("/traces/:traceId", GetTrace)
+
+			auth.GET("/devices/:id/logs", ListDeviceLogs)
+			auth.GET("/device-logs", ListAllDeviceLogs)
+
+			auth.GET("/devices/:id/sub-devices", ListSubDevices)
+			auth.POST("/devices/:id/sub-devices", AddSubDevice)
+			auth.DELETE("/devices/:id/sub-devices/:subId", RemoveSubDevice)
+
+			auth.GET("/firmwares", ListFirmwares)
+			auth.POST("/firmwares", CreateFirmware)
+			auth.DELETE("/firmwares/:id", DeleteFirmware)
+			auth.POST("/ota-tasks", CreateOTATask)
+			auth.GET("/ota-tasks", ListOTATasks)
 		}
 	}
 

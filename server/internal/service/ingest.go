@@ -6,10 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
@@ -17,13 +20,40 @@ import (
 	"iot-platform/internal/ws"
 )
 
-// FindDevice 按三元组标识查设备
+// mergeLatestScript Redis Lua 原子合并最新值（避免 GET→合并→SET 竞态）
+var mergeLatestScript = redis.NewScript(`
+local key = KEYS[1]
+local newData = ARGV[1]
+local newTs = ARGV[2]
+local old = redis.call('GET', key)
+if old then
+    local oldObj = cjson.decode(old)
+    local newObj = cjson.decode(newData)
+    local oldData = oldObj['data'] or {}
+    for k, v in pairs(newObj) do
+        oldData[k] = v
+    end
+    oldObj['data'] = oldData
+    oldObj['ts'] = tonumber(newTs)
+    redis.call('SET', key, cjson.encode(oldObj))
+else
+    local result = cjson.encode({ts = tonumber(newTs), data = cjson.decode(newData)})
+    redis.call('SET', key, result)
+end
+return 1
+`)
+
+// FindDevice 按三元组标识查设备（带缓存）
 func FindDevice(productKey, deviceName string) (*model.Device, error) {
+	if d := getCachedDevice(productKey, deviceName); d != nil {
+		return d, nil
+	}
 	var d model.Device
 	err := repository.DB.Where("product_key = ? AND name = ?", productKey, deviceName).First(&d).Error
 	if err != nil {
 		return nil, err
 	}
+	cacheDevice(&d)
 	return &d, nil
 }
 
@@ -70,6 +100,18 @@ func randSecret() string {
 	return hex.EncodeToString(b)
 }
 
+// FindDeviceByRegCode 按自定义注册码（IMEI/ICCID 等）查设备，用于 TCP 免三元组接入
+func FindDeviceByRegCode(regCode string) (*model.Device, error) {
+	if regCode == "" {
+		return nil, errors.New("注册码为空")
+	}
+	var d model.Device
+	if err := repository.DB.Where("reg_code = ?", regCode).First(&d).Error; err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
 // ParseClientID clientid 约定为 {productKey}.{deviceName}
 func ParseClientID(clientID string) (productKey, deviceName string, ok bool) {
 	parts := strings.SplitN(clientID, ".", 2)
@@ -81,6 +123,9 @@ func ParseClientID(clientID string) (productKey, deviceName string, ok bool) {
 
 // HandleTelemetry 处理设备上行数据（JSON 对象）；含 method=event.post 时分流到事件上报
 func HandleTelemetry(productKey, deviceName string, payload []byte) {
+	traceID := generateTraceID()
+	t0 := time.Now()
+
 	var data map[string]interface{}
 	if err := json.Unmarshal(payload, &data); err != nil || len(data) == 0 {
 		slog.Warn("invalid telemetry payload", "productKey", productKey, "device", deviceName)
@@ -92,39 +137,43 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 		return
 	}
 
-	// 事件上报分流
-	if m, ok := data["method"].(string); ok && m == "event.post" {
-		handleEventReport(d, data)
-		return
+	// 系统方法分流：事件上报 / NTP 对时 / 配置拉取
+	if m, ok := data["method"].(string); ok {
+		switch m {
+		case "event.post":
+			handleEventReport(d, data)
+			return
+		case "ntp.request":
+			handleNTPRequest(d, data)
+			return
+		case "config.get":
+			handleConfigGet(d)
+			return
+		}
 	}
 
 	now := time.Now()
-	t := model.Telemetry{Ts: now, DeviceID: d.ID, ProductKey: productKey, DeviceName: deviceName, Data: payload}
-	if err := repository.DB.Create(&t).Error; err != nil {
-		slog.Error("save telemetry failed", "err", err)
-		return
-	}
 
-	// 最新值缓存：按属性合并（分频采集/变更上报场景下，不同批次只含部分属性，不能整条覆盖）
-	merged := map[string]interface{}{}
-	if b, err := repository.RDB.Get(context.Background(), latestKey(d.ID)).Bytes(); err == nil {
-		var old struct {
-			Data map[string]interface{} `json:"data"`
-		}
-		if json.Unmarshal(b, &old) == nil {
-			merged = old.Data
-		}
+	// TSL 物模型校验
+	t1 := time.Now()
+	valid, validationErrors := ValidateTelemetry(d.ProductID, data)
+	t := model.Telemetry{
+		Ts: now, DeviceID: d.ID, ProductKey: productKey, DeviceName: deviceName,
+		Data: payload, Valid: valid,
 	}
-	if merged == nil {
-		merged = map[string]interface{}{}
+	if !valid && len(validationErrors) > 0 {
+		errJSON, _ := json.Marshal(validationErrors)
+		t.ValidationErrors = errJSON
 	}
-	for k, v := range data {
-		merged[k] = v
-	}
-	cache := map[string]interface{}{"ts": now.UnixMilli(), "data": merged}
-	if b, err := json.Marshal(cache); err == nil {
-		repository.RDB.Set(context.Background(), latestKey(d.ID), b, 0)
-	}
+	AppendTelemetry(t)
+	t2 := time.Now()
+
+	// 最新值缓存：按属性合并（Redis Lua 原子操作，避免竞态）
+	mergePayload, _ := json.Marshal(data)
+	mergeLatestScript.Run(context.Background(), repository.RDB,
+		[]string{latestKey(d.ID)},
+		string(mergePayload), fmt.Sprintf("%d", now.UnixMilli()),
+	)
 
 	// 实时推送
 	ws.H.PushTelemetry(d.UserID, d.ID, map[string]interface{}{"ts": now.UnixMilli(), "data": data})
@@ -132,6 +181,25 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	// 同步设备影子 reported + 规则引擎评估
 	mergeShadowReported(d, data)
 	rule.EvalTelemetry(d, data)
+	t3 := time.Now()
+
+	// 异步写入消息轨迹
+	traceStatus := "ok"
+	if !valid {
+		traceStatus = "validation_failed"
+	}
+	go writeTrace(&model.MessageTrace{
+		TraceID: traceID, UserID: d.UserID, ProductKey: productKey, DeviceName: deviceName,
+		DeviceID: d.ID, Direction: "up", Stage: "completed", Status: traceStatus,
+		Payload: string(payload),
+		IngestMs: int(t1.Sub(t0).Milliseconds()),
+		DecodeMs: 0,
+		StoreMs:  int(t2.Sub(t1).Milliseconds()),
+		RuleMs:   int(t3.Sub(t2).Milliseconds()),
+	})
+
+	// 异步写入设备日志
+	go writeDeviceLog(d.UserID, d.ID, d.Name, "data_up", fmt.Sprintf("上报 %d 个属性", len(data)), string(payload), traceID)
 }
 
 // HandleDeviceStatus 处理上下线事件
@@ -166,6 +234,14 @@ func HandleDeviceStatus(clientID string, online bool) {
 		syncShadowOnConnect(d)
 	}
 
+	// 异步写入设备日志
+	logCategory := "connection"
+	logSummary := "设备下线"
+	if online {
+		logSummary = "设备上线"
+	}
+	go writeDeviceLog(d.UserID, d.ID, d.Name, logCategory, logSummary, "clientid: "+clientID, "")
+
 	ws.H.PushDeviceStatus(d.UserID, d.ID, map[string]interface{}{
 		"deviceId": d.ID, "name": d.Name, "status": status, "ts": now.UnixMilli(),
 	})
@@ -190,4 +266,57 @@ func GetLatest(deviceID uint) map[string]interface{} {
 
 func latestKey(deviceID uint) string {
 	return "device:latest:" + strconv.FormatUint(uint64(deviceID), 10)
+}
+
+// HandleDeviceReply 处理设备指令应答，更新 CommandRequest 状态
+func HandleDeviceReply(topic string, payload []byte) {
+	var reply struct {
+		MessageID string      `json:"messageId"`
+		Code      int         `json:"code"`
+		Data      interface{} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &reply); err != nil {
+		slog.Warn("parse device reply failed", "topic", topic, "error", err)
+		return
+	}
+	if reply.MessageID == "" {
+		return
+	}
+
+	now := time.Now()
+	result := repository.DB.Model(&model.CommandRequest{}).
+		Where("message_id = ? AND status = ?", reply.MessageID, "pending").
+		Updates(map[string]interface{}{
+			"status":   "acked",
+			"response": string(payload),
+			"acked_at": now,
+		})
+	if result.RowsAffected == 0 {
+		slog.Warn("reply matched no pending command", "messageId", reply.MessageID)
+	}
+}
+
+// generateTraceID 生成简易唯一 traceId
+func generateTraceID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return fmt.Sprintf("%x%d", b, time.Now().UnixNano())
+}
+
+// writeTrace 异步写入消息轨迹
+func writeTrace(t *model.MessageTrace) {
+	if err := repository.DB.Create(t).Error; err != nil {
+		slog.Warn("write trace failed", "traceId", t.TraceID, "err", err)
+	}
+}
+
+// writeDeviceLog 异步写入设备运行日志
+func writeDeviceLog(userID, deviceID uint, deviceName, category, summary, payload, traceID string) {
+	log := model.DeviceLog{
+		UserID: userID, DeviceID: deviceID, DeviceName: deviceName,
+		Category: category, Summary: summary, Payload: payload, TraceID: traceID,
+	}
+	if err := repository.DB.Create(&log).Error; err != nil {
+		slog.Warn("write device log failed", "err", err)
+	}
 }

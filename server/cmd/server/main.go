@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log/slog"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"iot-platform/internal/api"
 	"iot-platform/internal/config"
@@ -28,10 +33,18 @@ func main() {
 		slog.Error("init database failed", "err", err)
 		os.Exit(1)
 	}
+
+	// 初始化性能组件
+	service.InitDeviceCache(config.C.Cache.DeviceTTL)
+	service.InitTelemetryBuffer(config.C.TelemetryBuffer.MaxBatch, config.C.TelemetryBuffer.FlushInterval)
+	service.InitShadowCache(config.C.Cache.ShadowFlushInterval)
+	poller.InitPollerSemaphore(config.C.Poller.MaxConcurrent)
+
 	api.EnsureAdmin()
 
 	// MQTT 后台连接（EMQX 未启动时自动重连，不阻塞 HTTP 服务）
 	mqtt.Start()
+	mqtt.SubscribeReply()
 
 	// TCP 透传网关（DTU）
 	gateway.Start()
@@ -60,13 +73,47 @@ func main() {
 		return err
 	}
 
+	// 广播分发：TCP 在线设备逐连接下发 + MQTT 广播主题
+	service.Broadcaster = func(productKey string, payload []byte) error {
+		gateway.Broadcast(productKey, payload)
+		return mqtt.PublishBroadcast(productKey, payload)
+	}
+
 	// 离线告警巡检
 	rule.StartOfflineChecker()
 
 	r := api.NewRouter()
-	slog.Info("iot-platform server started", "addr", config.C.Server.Addr)
-	if err := r.Run(config.C.Server.Addr); err != nil {
-		slog.Error("server exited", "err", err)
-		os.Exit(1)
+	srv := &http.Server{
+		Addr:    config.C.Server.Addr,
+		Handler: r,
 	}
+
+	// 监听系统信号，优雅关闭
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		slog.Info("iot-platform server started", "addr", config.C.Server.Addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("server exited", "err", err)
+			os.Exit(1)
+		}
+	}()
+
+	// 等待中断信号
+	<-ctx.Done()
+	slog.Info("shutting down server...")
+
+	// shutdown 时逆序关闭性能组件
+	service.ShutdownShadowCache()
+	service.ShutdownTelemetryBuffer()
+
+	// 优雅关闭 HTTP 服务
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("server shutdown failed", "err", err)
+	}
+
+	slog.Info("server exited gracefully")
 }

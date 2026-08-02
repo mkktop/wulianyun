@@ -42,6 +42,11 @@ func checkCRC(frame []byte) bool {
 	return frame[len(frame)-2] == byte(crc&0xFF) && frame[len(frame)-1] == byte(crc>>8)
 }
 
+// CheckCRC 对外暴露的 CRC16 帧校验（供 TCP 网关组帧使用）
+func CheckCRC(frame []byte) bool {
+	return checkCRC(frame)
+}
+
 // BuildReadRequest 构造读请求帧（功能码 1/2/3/4）
 func BuildReadRequest(p *model.ModbusPoint) ([]byte, error) {
 	switch p.FunctionCode {

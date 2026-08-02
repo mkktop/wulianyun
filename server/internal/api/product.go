@@ -24,6 +24,15 @@ type productReq struct {
 	SecretMode   string `json:"secretMode" binding:"omitempty,oneof=device product"`
 	PollInterval int    `json:"pollInterval"`
 	Description  string `json:"description"`
+
+	// TCP 组帧/心跳（透传产品可配；Modbus 固定按 RTU 组帧）
+	FrameMode       string `json:"frameMode" binding:"omitempty,oneof=none delimiter length"`
+	FrameDelimiter  string `json:"frameDelimiter"`
+	FrameLenOffset  int    `json:"frameLenOffset"`
+	FrameLenSize    int    `json:"frameLenSize"`
+	FrameLenAdjust  int    `json:"frameLenAdjust"`
+	HeartbeatPacket string `json:"heartbeatPacket"`
+	HeartbeatReply  string `json:"heartbeatReply"`
 }
 
 func CreateProduct(c *gin.Context) {
@@ -57,6 +66,12 @@ func CreateProduct(c *gin.Context) {
 		UserID: UID(c), Name: req.Name, ProductKey: "pk" + randHex(8),
 		Protocol: req.Protocol, DataFormat: req.DataFormat, Description: req.Description,
 		AccessMode: req.AccessMode, SecretMode: req.SecretMode, PollInterval: req.PollInterval,
+		FrameMode: req.FrameMode, FrameDelimiter: req.FrameDelimiter,
+		FrameLenOffset: req.FrameLenOffset, FrameLenSize: req.FrameLenSize, FrameLenAdjust: req.FrameLenAdjust,
+		HeartbeatPacket: req.HeartbeatPacket, HeartbeatReply: req.HeartbeatReply,
+	}
+	if p.FrameMode == "" {
+		p.FrameMode = model.FrameModeNone
 	}
 	// 一型一密：生成产品级密钥
 	if req.SecretMode == model.SecretModeProduct {
@@ -109,10 +124,22 @@ func UpdateProduct(c *gin.Context) {
 		Fail(c, 400, "参数错误")
 		return
 	}
-	// 接入方式/协议/密钥模式创建后不可变；仅允许改名称/描述/采集周期
+	// 接入方式/协议/密钥模式创建后不可变；允许改名称/描述/采集周期/组帧与心跳配置
 	updates := map[string]interface{}{"name": req.Name, "description": req.Description}
 	if p.AccessMode == model.AccessModeModbus && req.PollInterval >= 60 {
 		updates["poll_interval"] = req.PollInterval
+	}
+	// 非 Modbus 的 TCP 产品：允许调整组帧/心跳配置
+	if p.Protocol == "tcp" && p.AccessMode != model.AccessModeModbus {
+		if req.FrameMode != "" {
+			updates["frame_mode"] = req.FrameMode
+		}
+		updates["frame_delimiter"] = req.FrameDelimiter
+		updates["frame_len_offset"] = req.FrameLenOffset
+		updates["frame_len_size"] = req.FrameLenSize
+		updates["frame_len_adjust"] = req.FrameLenAdjust
+		updates["heartbeat_packet"] = req.HeartbeatPacket
+		updates["heartbeat_reply"] = req.HeartbeatReply
 	}
 	repository.DB.Model(&p).Updates(updates)
 	OK(c, p)

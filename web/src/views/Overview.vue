@@ -1,11 +1,11 @@
 <template>
   <div>
     <el-row :gutter="16">
-      <el-col :span="6" v-for="card in cards" :key="card.label">
+      <el-col :span="4" v-for="card in cards" :key="card.label">
         <el-card shadow="hover" class="stat-card" :body-style="{ padding: '0' }">
           <div class="stat" :style="{ borderTopColor: card.color }">
             <div class="stat-icon" :style="{ background: card.bg, color: card.color }">
-              <el-icon :size="26"><component :is="card.icon" /></el-icon>
+              <el-icon :size="24"><component :is="card.icon" /></el-icon>
             </div>
             <div class="stat-body">
               <div class="num">{{ card.value }}</div>
@@ -43,7 +43,7 @@ import * as echarts from 'echarts'
 import { api } from '../api'
 import { realtime } from '../utils/realtime'
 
-const data = ref<any>({ productCount: 0, deviceCount: 0, onlineCount: 0, msgToday: 0, msgTrend: [], statusDist: [] })
+const data = ref<any>({ productCount: 0, deviceCount: 0, onlineCount: 0, onlineRate: 0, msgToday: 0, msgTotal: 0, msgRateMin: 0, msgTrend: [], statusDist: [] })
 const chartRef = ref<HTMLElement>()
 const pieRef = ref<HTMLElement>()
 const chart = shallowRef<echarts.ECharts>()
@@ -53,7 +53,9 @@ const cards = computed(() => [
   { label: '产品总数', value: data.value.productCount, icon: 'Box', color: '#409EFF', bg: '#ecf5ff' },
   { label: '设备总数', value: data.value.deviceCount, icon: 'Cpu', color: '#67C23A', bg: '#f0f9eb' },
   { label: '在线设备', value: data.value.onlineCount, icon: 'Connection', color: '#E6A23C', bg: '#fdf6ec' },
-  { label: '今日消息', value: data.value.msgToday, icon: 'ChatDotSquare', color: '#F56C6C', bg: '#fef0f0' }
+  { label: '在线率', value: (data.value.onlineRate ?? 0) + '%', icon: 'DataLine', color: '#36CFC9', bg: '#e6fffb' },
+  { label: '今日消息', value: data.value.msgToday, icon: 'ChatDotSquare', color: '#F56C6C', bg: '#fef0f0' },
+  { label: '吞吐量/分', value: data.value.msgRateMin ?? 0, icon: 'Histogram', color: '#722ED1', bg: '#f9f0ff' }
 ])
 
 const statusNames: Record<string, string> = { online: '在线', offline: '离线', inactive: '未激活', disabled: '已禁用' }
@@ -132,15 +134,15 @@ onUnmounted(() => {
 .stat-card { border-radius: 10px; overflow: hidden; transition: transform 0.2s; }
 .stat-card:hover { transform: translateY(-2px); }
 .stat {
-  display: flex; align-items: center; gap: 16px; padding: 20px;
+  display: flex; align-items: center; gap: 12px; padding: 16px;
   border-top: 3px solid transparent;
 }
 .stat-icon {
-  width: 56px; height: 56px; border-radius: 12px;
+  width: 48px; height: 48px; border-radius: 10px;
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 .stat-body { min-width: 0; }
-.num { font-size: 28px; font-weight: 700; line-height: 1.2; color: #303133; }
+.num { font-size: 24px; font-weight: 700; line-height: 1.2; color: #303133; }
 .label { color: #909399; font-size: 13px; margin-top: 4px; }
 .chart-row { margin-top: 16px; }
 .card-head { font-weight: 600; }

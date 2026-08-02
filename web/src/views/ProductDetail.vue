@@ -68,6 +68,22 @@
       <!-- 功能定义 -->
       <el-tab-pane :label="defLabel" name="definition">
         <el-card shadow="never">
+          <div class="toolbar" v-if="product.accessMode === 'thingmodel'">
+            <span />
+            <div>
+              <el-button @click="exportTsl">
+                <el-icon><Download /></el-icon>&nbsp;导出 TSL
+              </el-button>
+              <el-upload
+                :show-file-list="false" accept=".json" :before-upload="importTsl"
+                style="display: inline-block; margin-left: 8px"
+              >
+                <el-button>
+                  <el-icon><Upload /></el-icon>&nbsp;导入 TSL
+                </el-button>
+              </el-upload>
+            </div>
+          </div>
           <ThingModelEditor v-if="product.accessMode === 'thingmodel'"
             v-model:properties="tsl.properties" v-model:events="tsl.events" v-model:services="tsl.services" />
           <ModbusPointEditor v-else-if="product.accessMode === 'modbus'"
@@ -153,6 +169,23 @@
         </el-card>
       </el-tab-pane>
 
+      <!-- 远程配置 -->
+      <el-tab-pane label="远程配置" name="config">
+        <el-card shadow="never">
+          <el-alert type="info" :closable="false" style="margin-bottom: 12px">
+            JSON 格式配置，设备可通过 method=config.get 主动拉取；也可点击"推送"广播给产品下全部在线设备（当前版本 v{{ cfgVersion }}）
+          </el-alert>
+          <el-input v-model="cfgText" type="textarea" :rows="12" placeholder='{"reportInterval": 60}' spellcheck="false" style="font-family: monospace" />
+          <div style="margin-top: 12px; display: flex; justify-content: space-between">
+            <el-button @click="broadcastVisible = true">自定义广播</el-button>
+            <div>
+              <el-button type="primary" plain :loading="cfgSaving" @click="saveCfg">保存配置</el-button>
+              <el-button type="primary" :loading="cfgPushing" @click="pushCfg">保存并推送</el-button>
+            </div>
+          </div>
+        </el-card>
+      </el-tab-pane>
+
       <!-- 指令下发日志 -->
       <el-tab-pane label="指令下发日志" name="cmdlogs">
         <el-card shadow="never">
@@ -189,6 +222,18 @@
       <template #footer>
         <el-button @click="batchVisible = false">取消</el-button>
         <el-button type="primary" :loading="importing" @click="doImport">导入</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 自定义广播 -->
+    <el-dialog v-model="broadcastVisible" title="自定义广播" width="520px">
+      <el-alert type="warning" :closable="false" style="margin-bottom: 12px">
+        JSON 消息将下发到产品下全部在线设备（MQTT 设备需订阅 thing/broadcast/{{ product.productKey }}）
+      </el-alert>
+      <el-input v-model="broadcastText" type="textarea" :rows="8" placeholder='{"method":"custom.notify","params":{}}' spellcheck="false" style="font-family: monospace" />
+      <template #footer>
+        <el-button @click="broadcastVisible = false">取消</el-button>
+        <el-button type="primary" :loading="broadcasting" @click="doBroadcast">广播</el-button>
       </template>
     </el-dialog>
   </div>
@@ -248,6 +293,16 @@ const logTotal = ref(0)
 const logPage = ref(1)
 const logLoading = ref(false)
 
+// 远程配置 / 广播
+const cfgText = ref('{}')
+const cfgVersion = ref(0)
+const cfgLoaded = ref(false)
+const cfgSaving = ref(false)
+const cfgPushing = ref(false)
+const broadcastVisible = ref(false)
+const broadcastText = ref('')
+const broadcasting = ref(false)
+
 const defLabel = computed(() => {
   if (!product.value) return '功能定义'
   return ({ thingmodel: '功能定义(物模型)', modbus: 'Modbus点位表', passthrough: '解析脚本' } as any)[product.value.accessMode]
@@ -286,7 +341,8 @@ const topics = computed(() => {
   const pk = product.value.productKey
   return [
     { topic: `thing/up/${pk}/{deviceName}`, dir: '上行', desc: '属性上报（JSON）；含 method=event.post 时为事件上报' },
-    { topic: `thing/down/${pk}/{deviceName}`, dir: '下行', desc: '属性设置/服务调用/透传命令' }
+    { topic: `thing/down/${pk}/{deviceName}`, dir: '下行', desc: '属性设置/服务调用/透传命令' },
+    { topic: `thing/broadcast/${pk}`, dir: '下行', desc: '产品级广播（远程配置推送/自定义广播）' }
   ]
 })
 
@@ -353,6 +409,49 @@ async function saveDefinition() {
   }
 }
 
+// ---- 物模型导入/导出 ----
+const tslImporting = ref(false)
+
+async function exportTsl() {
+  try {
+    const resp = await api.tsl.export(id) as any
+    const blob = new Blob([JSON.stringify(resp, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `tsl-${product.value?.productKey || id}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+  } catch {
+    ElMessage.error('导出失败')
+  }
+}
+
+function importTsl(file: File) {
+  const reader = new FileReader()
+  reader.onload = async (e) => {
+    try {
+      JSON.parse(e.target?.result as string) // validate JSON
+    } catch {
+      ElMessage.error('文件格式错误，不是有效的 JSON')
+      return
+    }
+    tslImporting.value = true
+    try {
+      await api.tsl.import(id, file)
+      ElMessage.success('导入成功，正在刷新...')
+      // 重新加载物模型
+      defLoaded.value = false
+      loadDefinition()
+    } finally {
+      tslImporting.value = false
+    }
+  }
+  reader.readAsText(file)
+  return false // prevent el-upload default upload
+}
+
 async function loadDevices() {
   devLoading.value = true
   try {
@@ -391,7 +490,74 @@ function onTabChange(name: string | number) {
   else if (name === 'devices') loadDevices()
   else if (name === 'events') loadEvents()
   else if (name === 'cmdlogs') loadCmdLogs()
+  else if (name === 'config') loadCfg()
   else if (name === 'overview') loadStats()
+}
+
+// ---- 远程配置 / 广播 ----
+async function loadCfg() {
+  if (cfgLoaded.value) return
+  cfgLoaded.value = true
+  const res = await api.getRemoteConfig(id)
+  cfgVersion.value = res.version
+  cfgText.value = JSON.stringify(res.config || {}, null, 2)
+}
+
+function parseCfg(): Record<string, any> | null {
+  try {
+    const obj = JSON.parse(cfgText.value || '{}')
+    if (typeof obj !== 'object' || Array.isArray(obj)) throw new Error()
+    return obj
+  } catch {
+    ElMessage.warning('配置必须是合法的 JSON 对象')
+    return null
+  }
+}
+
+async function saveCfg() {
+  const cfg = parseCfg()
+  if (!cfg) return
+  cfgSaving.value = true
+  try {
+    const res = await api.saveRemoteConfig(id, cfg)
+    cfgVersion.value = res.version
+    ElMessage.success(`已保存（v${res.version}）`)
+  } finally {
+    cfgSaving.value = false
+  }
+}
+
+async function pushCfg() {
+  const cfg = parseCfg()
+  if (!cfg) return
+  cfgPushing.value = true
+  try {
+    const res = await api.saveRemoteConfig(id, cfg)
+    cfgVersion.value = res.version
+    await api.pushRemoteConfig(id)
+    ElMessage.success(`已推送到全部在线设备（v${res.version}）`)
+  } finally {
+    cfgPushing.value = false
+  }
+}
+
+async function doBroadcast() {
+  let payload: any
+  try {
+    payload = JSON.parse(broadcastText.value)
+    if (typeof payload !== 'object' || Array.isArray(payload) || !Object.keys(payload).length) throw new Error()
+  } catch {
+    ElMessage.warning('广播内容必须是非空 JSON 对象')
+    return
+  }
+  broadcasting.value = true
+  try {
+    await api.broadcastProduct(id, payload)
+    broadcastVisible.value = false
+    ElMessage.success('广播已下发')
+  } finally {
+    broadcasting.value = false
+  }
 }
 
 async function doImport() {

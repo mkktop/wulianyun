@@ -202,3 +202,31 @@ func BatchCreateDevices(c *gin.Context) {
 	}
 	OK(c, gin.H{"created": created, "failed": failed})
 }
+
+// DeviceAlarmStats 产品下设备告警统计（按设备+分组聚合）
+func DeviceAlarmStats(c *gin.Context) {
+	var p model.Product
+	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+		Fail(c, 404, "产品不存在")
+		return
+	}
+
+	var stats []model.DeviceAlarmStat
+	repository.DB.Raw(`
+		SELECT
+			d.id AS device_id,
+			d.name AS device_name,
+			COALESCE(dg.name, '未分组') AS group_name,
+			COUNT(a.id) AS total_alarms,
+			COUNT(a.id) FILTER (WHERE a.status = 'firing') AS firing_count,
+			COUNT(a.id) FILTER (WHERE a.status = 'resolved') AS resolved_count
+		FROM devices d
+		LEFT JOIN device_groups dg ON dg.id = d.group_id
+		LEFT JOIN alarms a ON a.device_id = d.id
+		WHERE d.product_id = ?
+		GROUP BY d.id, dg.name
+		ORDER BY total_alarms DESC
+	`, p.ID).Scan(&stats)
+
+	OK(c, stats)
+}

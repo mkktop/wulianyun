@@ -19,7 +19,11 @@ const router = createRouter({
         { path: 'devices/:id', component: () => import('../views/DeviceDetail.vue'), meta: { title: '设备详情' } },
         { path: 'rules', component: () => import('../views/Rules.vue'), meta: { title: '规则引擎' } },
         { path: 'alarms', component: () => import('../views/Alarms.vue'), meta: { title: '告警中心' } },
-        { path: 'apps', component: () => import('../views/Apps.vue'), meta: { title: '应用管理' } }
+        { path: 'apps', component: () => import('../views/Apps.vue'), meta: { title: '应用管理' } },
+        { path: 'ota', component: () => import('../views/OTA.vue'), meta: { title: 'OTA升级' } },
+        { path: 'tools/simulator', component: () => import('../views/DeviceSimulator.vue'), meta: { title: '设备模拟器' } },
+        { path: 'tools/mqtt-debug', component: () => import('../views/MqttDebug.vue'), meta: { title: 'MQTT调试台' } },
+        { path: 'tools/traces', component: () => import('../views/MessageTraces.vue'), meta: { title: '消息轨迹' } }
       ]
     }
   ]

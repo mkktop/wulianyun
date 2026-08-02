@@ -8,6 +8,7 @@ import (
 
 	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
+	"iot-platform/internal/rule"
 )
 
 type ruleReq struct {
@@ -43,6 +44,7 @@ func CreateRule(c *gin.Context) {
 		Fail(c, 500, "创建失败")
 		return
 	}
+	rule.InvalidateRuleCache(UID(c))
 	OK(c, r)
 }
 
@@ -97,6 +99,7 @@ func UpdateRule(c *gin.Context) {
 		updates["enabled"] = *req.Enabled
 	}
 	repository.DB.Model(&r).Updates(updates)
+	rule.InvalidateRuleCache(UID(c))
 	OK(c, r)
 }
 
@@ -106,6 +109,7 @@ func DeleteRule(c *gin.Context) {
 		Fail(c, 404, "规则不存在")
 		return
 	}
+	rule.InvalidateRuleCache(UID(c))
 	OK(c, nil)
 }
 
@@ -140,12 +144,44 @@ func ResolveAlarm(c *gin.Context) {
 	OK(c, nil)
 }
 
+// ConfirmAlarm 确认告警（标记已确认，不改状态）
+func ConfirmAlarm(c *gin.Context) {
+	var a model.Alarm
+	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&a).Error; err != nil {
+		Fail(c, 404, "告警不存在")
+		return
+	}
+	now := time.Now()
+	repository.DB.Model(&a).Update("confirmed_at", now)
+	OK(c, nil)
+}
+
 // AlarmStats 告警统计（概览用）
 func AlarmStats(c *gin.Context) {
 	uid := UID(c)
-	var firing, total int64
+	var firing, resolved, total, todayCount int64
 	repository.DB.Model(&model.Alarm{}).Where("user_id = ? AND status = ?", uid, model.AlarmStatusFiring).Count(&firing)
+	repository.DB.Model(&model.Alarm{}).Where("user_id = ? AND status = ?", uid, model.AlarmStatusResolved).Count(&resolved)
+	repository.DB.Model(&model.Alarm{}).Where("user_id = ?", uid).Count(&total)
 	today := time.Now().Truncate(24 * time.Hour)
-	repository.DB.Model(&model.Alarm{}).Where("user_id = ? AND created_at >= ?", uid, today).Count(&total)
-	OK(c, gin.H{"firing": firing, "today": total})
+	repository.DB.Model(&model.Alarm{}).Where("user_id = ? AND created_at >= ?", uid, today).Count(&todayCount)
+	OK(c, gin.H{"total": total, "firing": firing, "resolved": resolved, "today": todayCount})
+}
+
+// AlarmTrend 近7日告警趋势
+func AlarmTrend(c *gin.Context) {
+	uid := UID(c)
+	type dayCount struct {
+		Day   string `json:"day"`
+		Count int64  `json:"count"`
+	}
+	var trend []dayCount
+	today := time.Now().Truncate(24 * time.Hour)
+	repository.DB.Raw(`
+		SELECT to_char(date_trunc('day', created_at), 'MM-DD') AS day, count(*) AS count
+		FROM alarms
+		WHERE user_id = ? AND created_at >= ?
+		GROUP BY 1 ORDER BY 1
+	`, uid, today.AddDate(0, 0, -6)).Scan(&trend)
+	OK(c, trend)
 }

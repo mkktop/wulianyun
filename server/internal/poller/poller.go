@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"strconv"
 	"sync"
 	"time"
@@ -29,7 +30,51 @@ var (
 
 	// 变更上报缓存：key = productKey.deviceName.identifier -> 上次上报值
 	lastValues sync.Map
+
+	// 点位缓存：key = "productID_groupID" -> []model.ModbusPoint
+	pointCache     sync.Map
+	pointCacheTTL  = 5 * time.Minute
+	pointCacheTime sync.Map
+
+	// 并发限制信号量
+	pollSemaphore chan struct{}
 )
+
+// InitPollerSemaphore 初始化轮询并发信号量
+func InitPollerSemaphore(maxConcurrent int) {
+	if maxConcurrent <= 0 {
+		maxConcurrent = 50
+	}
+	pollSemaphore = make(chan struct{}, maxConcurrent)
+}
+
+func getCachedPoints(productID, groupID uint) ([]model.ModbusPoint, bool) {
+	key := fmt.Sprintf("%d_%d", productID, groupID)
+	if t, ok := pointCacheTime.Load(key); ok {
+		if time.Since(t.(time.Time)) < pointCacheTTL {
+			if pts, ok := pointCache.Load(key); ok {
+				return pts.([]model.ModbusPoint), true
+			}
+		}
+	}
+	return nil, false
+}
+
+func cachePoints(productID, groupID uint, pts []model.ModbusPoint) {
+	key := fmt.Sprintf("%d_%d", productID, groupID)
+	pointCache.Store(key, pts)
+	pointCacheTime.Store(key, time.Now())
+}
+
+// InvalidatePointCache 使指定产品的点位缓存失效
+func InvalidatePointCache(productID uint) {
+	// 简单实现：清空所有（产品数量不多）
+	pointCache.Range(func(k, v any) bool {
+		pointCache.Delete(k)
+		pointCacheTime.Delete(k)
+		return true
+	})
+}
 
 // Init 注册到 gateway 的上下线钩子
 func Init() {
@@ -111,6 +156,13 @@ func clampInterval(sec int) time.Duration {
 
 // runGroup 单个采集组的独立调度循环
 func runGroup(p *model.Product, deviceName string, g groupPlan, cancel chan struct{}) {
+	// 首次执行前加随机延迟，避免多设备同时轮询
+	jitter := time.Duration(rand.Int63n(int64(g.interval)))
+	select {
+	case <-cancel:
+		return
+	case <-time.After(jitter):
+	}
 	pollGroup(p, deviceName, g)
 	ticker := time.NewTicker(g.interval)
 	defer ticker.Stop()
@@ -126,8 +178,24 @@ func runGroup(p *model.Product, deviceName string, g groupPlan, cancel chan stru
 
 // pollGroup 采集一个组：合并连续寄存器批量读取 → 变更过滤 → 上报
 func pollGroup(p *model.Product, deviceName string, g groupPlan) {
+	// 获取信号量
+	if pollSemaphore != nil {
+		select {
+		case pollSemaphore <- struct{}{}:
+			defer func() { <-pollSemaphore }()
+		case <-time.After(3 * time.Second):
+			slog.Warn("poll semaphore timeout", "device", deviceName)
+			return
+		}
+	}
+
 	var points []model.ModbusPoint
-	repository.DB.Where("product_id = ? AND group_id = ?", p.ID, g.id).Order("address asc").Find(&points)
+	if pts, ok := getCachedPoints(p.ID, g.id); ok {
+		points = pts
+	} else {
+		repository.DB.Where("product_id = ? AND group_id = ?", p.ID, g.id).Order("address asc").Find(&points)
+		cachePoints(p.ID, g.id, points)
+	}
 	if len(points) == 0 {
 		return
 	}

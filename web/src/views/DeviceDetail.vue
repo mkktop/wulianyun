@@ -29,7 +29,9 @@
       </el-descriptions>
     </el-card>
 
-    <el-row :gutter="16" style="margin-top: 16px">
+    <el-tabs v-model="activeTab" style="margin-top: 16px">
+      <el-tab-pane label="设备监控" name="monitor">
+    <el-row :gutter="16">
       <el-col :span="10">
         <el-card shadow="never">
           <template #header>
@@ -148,13 +150,80 @@
         </el-card>
       </el-col>
     </el-row>
+      </el-tab-pane>
+
+      <el-tab-pane label="运行日志" name="logs">
+        <el-card shadow="never">
+          <div class="toolbar">
+            <el-select v-model="logCategory" placeholder="全部分类" clearable style="width: 160px" @change="loadLogs">
+              <el-option label="连接" value="connection" />
+              <el-option label="数据上行" value="data_up" />
+              <el-option label="数据下行" value="data_down" />
+              <el-option label="事件" value="event" />
+              <el-option label="错误" value="error" />
+            </el-select>
+          </div>
+          <el-table :data="logs" v-loading="logsLoading" size="small" stripe>
+            <el-table-column label="分类" width="110">
+              <template #default="{ row }">
+                <el-tag size="small" :type="logCategoryType(row.category)">{{ logCategoryText(row.category) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="summary" label="摘要" min-width="300" show-overflow-tooltip />
+            <el-table-column label="时间" width="170">
+              <template #default="{ row }">{{ fmt(row.createdAt) }}</template>
+            </el-table-column>
+          </el-table>
+          <el-pagination
+            class="pager" background layout="total, prev, pager, next"
+            :total="logsTotal" :page-size="logsSize" v-model:current-page="logsPage" @current-change="loadLogs"
+          />
+        </el-card>
+      </el-tab-pane>
+
+      <el-tab-pane v-if="device?.isGateway" label="子设备" name="subdevices">
+        <el-card shadow="never">
+          <div class="toolbar">
+            <el-button type="primary" @click="showAddSub = true">添加子设备</el-button>
+          </div>
+          <el-table :data="subDevices" v-loading="subLoading" stripe>
+            <el-table-column prop="id" label="ID" width="80" />
+            <el-table-column prop="name" label="设备名称" />
+            <el-table-column prop="productKey" label="ProductKey" width="160" />
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="100">
+              <template #default="{ row }">
+                <el-button link type="danger" @click="removeSub(row.id)">移除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-tab-pane>
+    </el-tabs>
+
+    <!-- 添加子设备对话框 -->
+    <el-dialog v-model="showAddSub" title="添加子设备" width="400px">
+      <el-form label-width="80px">
+        <el-form-item label="设备ID">
+          <el-input-number v-model="subDeviceId" :min="1" style="width: 100%" placeholder="输入要添加的设备ID" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showAddSub = false">取消</el-button>
+        <el-button type="primary" @click="addSub">添加</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import { api, type Device, type TslProperty, type TslService } from '../api'
 import { realtime } from '../utils/realtime'
@@ -172,6 +241,21 @@ const range = ref(1)
 const shadow = ref<any>(null)
 const settingProp = ref(false)
 const invoking = ref('')
+const activeTab = ref('monitor')
+
+// 运行日志
+const logCategory = ref('')
+const logs = ref<any[]>([])
+const logsTotal = ref(0)
+const logsPage = ref(1)
+const logsSize = 15
+const logsLoading = ref(false)
+
+// 子设备
+const subDevices = ref<any[]>([])
+const subLoading = ref(false)
+const showAddSub = ref(false)
+const subDeviceId = ref(0)
 
 // 物模型
 const properties = ref<TslProperty[]>([])
@@ -381,10 +465,62 @@ function copy(text: string) {
 
 const onResize = () => charts.forEach((c) => c.resize())
 
+async function loadLogs() {
+  logsLoading.value = true
+  try {
+    const params: any = { page: logsPage.value, size: logsSize }
+    if (logCategory.value) params.category = logCategory.value
+    const res = await api.deviceLogs.list(id, params) as any
+    logs.value = res.list || []
+    logsTotal.value = res.total || 0
+  } finally {
+    logsLoading.value = false
+  }
+}
+
+function logCategoryType(c: string) {
+  return ({ connection: 'success', data_up: '', data_down: 'warning', event: 'info', error: 'danger' } as any)[c] || 'info'
+}
+function logCategoryText(c: string) {
+  return ({ connection: '连接', data_up: '数据上行', data_down: '数据下行', event: '事件', error: '错误' } as any)[c] || c
+}
+
+async function loadSubDevices() {
+  if (!device.value?.isGateway) return
+  subLoading.value = true
+  try {
+    subDevices.value = (await api.gateway.subDevices(id)) as any[]
+  } catch {
+    subDevices.value = []
+  } finally {
+    subLoading.value = false
+  }
+}
+
+async function addSub() {
+  if (!subDeviceId.value) {
+    ElMessage.warning('请输入设备ID')
+    return
+  }
+  await api.gateway.addSubDevice(id, { deviceId: subDeviceId.value })
+  ElMessage.success('已添加')
+  showAddSub.value = false
+  subDeviceId.value = 0
+  loadSubDevices()
+}
+
+async function removeSub(deviceId: number) {
+  await ElMessageBox.confirm('确认移除该子设备？', '提示')
+  await api.gateway.removeSubDevice(id, deviceId)
+  ElMessage.success('已移除')
+  loadSubDevices()
+}
+
 onMounted(async () => {
   await load()
   loadHistory()
   loadShadow()
+  loadSubDevices()
   realtime.on(onMsg)
   realtime.subscribe(id)
   window.addEventListener('resize', onResize)
@@ -415,4 +551,6 @@ onUnmounted(() => {
 .prop-info { flex: 1; display: flex; flex-direction: column; }
 .prop-name { font-size: 14px; }
 .svc-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.toolbar { display: flex; justify-content: space-between; margin-bottom: 12px; }
+.pager { margin-top: 12px; justify-content: flex-end; }
 </style>

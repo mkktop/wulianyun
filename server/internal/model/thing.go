@@ -51,8 +51,9 @@ type Rule struct {
 	Type      string         `gorm:"size:16;not null" json:"type"`
 	Condition datatypes.JSON `gorm:"type:jsonb;default:'{}'" json:"condition"`
 	Action    datatypes.JSON `gorm:"type:jsonb;default:'{}'" json:"action"`
-	Silence   int            `gorm:"default:5" json:"silence"` // 静默期(分钟)，防告警风暴
-	Enabled   bool           `gorm:"default:true" json:"enabled"`
+	Silence    int            `gorm:"default:5" json:"silence"`     // 静默期(分钟)，防告警风暴
+	RetryCount int            `gorm:"default:3" json:"retryCount"` // Webhook重试次数
+	Enabled    bool           `gorm:"default:true" json:"enabled"`
 	CreatedAt time.Time      `json:"createdAt"`
 
 	ProductName string `gorm:"-" json:"productName"`
@@ -78,4 +79,5 @@ type Alarm struct {
 	Status     string     `gorm:"size:16;default:firing;index" json:"status"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	ResolvedAt *time.Time `json:"resolvedAt"`
+	ConfirmedAt *time.Time `json:"confirmedAt"`
 }

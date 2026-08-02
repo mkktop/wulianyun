@@ -43,6 +43,43 @@
       </el-form>
     </el-card>
 
+    <!-- TCP 组帧与心跳（透传/脚本解析产品；Modbus 固定按 RTU 帧组帧） -->
+    <el-card v-if="form.protocol === 'tcp' && form.accessMode !== 'modbus'" shadow="never" style="margin-top: 16px">
+      <template #header>TCP 组帧与心跳</template>
+      <el-form :model="form" label-width="100px" style="max-width: 640px">
+        <el-form-item label="组帧方式">
+          <el-radio-group v-model="form.frameMode">
+            <el-radio value="none">不组帧</el-radio>
+            <el-radio value="delimiter">定界符</el-radio>
+            <el-radio value="length">长度字段</el-radio>
+          </el-radio-group>
+          <div class="hint">{{ frameHint }}</div>
+        </el-form-item>
+        <el-form-item label="定界符" v-if="form.frameMode === 'delimiter'">
+          <el-input v-model="form.frameDelimiter" placeholder="HEX，如 0D0A 表示 \r\n" style="width: 220px" />
+        </el-form-item>
+        <template v-if="form.frameMode === 'length'">
+          <el-form-item label="长度字段">
+            偏移 <el-input-number v-model="form.frameLenOffset" :min="0" :max="64" style="width: 110px" />
+            &nbsp;字节数 <el-radio-group v-model="form.frameLenSize" style="margin-left: 6px">
+              <el-radio :value="1">1</el-radio>
+              <el-radio :value="2">2(大端)</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="长度调整">
+            <el-input-number v-model="form.frameLenAdjust" :min="-64" :max="64" />
+            <div class="hint">帧总长 = 长度字段值 + 调整值（如长度不含头部时补正）</div>
+          </el-form-item>
+        </template>
+        <el-form-item label="心跳包">
+          <el-input v-model="form.heartbeatPacket" placeholder="留空默认 PING；支持文本或 0x 开头 HEX" />
+        </el-form-item>
+        <el-form-item label="心跳回复">
+          <el-input v-model="form.heartbeatReply" placeholder="留空不回复（默认心跳时回复 PONG）" />
+        </el-form-item>
+      </el-form>
+    </el-card>
+
     <!-- 功能定义：随接入方式切换 -->
     <el-card shadow="never" style="margin-top: 16px">
       <template #header>
@@ -102,7 +139,9 @@ const createdProduct = ref<Product | null>(null)
 
 const form = reactive({
   name: '', protocol: 'mqtt', accessMode: 'thingmodel',
-  secretMode: 'device', pollInterval: 60, description: ''
+  secretMode: 'device', pollInterval: 60, description: '',
+  frameMode: 'none', frameDelimiter: '', frameLenOffset: 0, frameLenSize: 1, frameLenAdjust: 0,
+  heartbeatPacket: '', heartbeatReply: ''
 })
 const tsl = reactive<{ properties: TslProperty[]; events: TslEvent[]; services: TslService[] }>({
   properties: [], events: [], services: []
@@ -115,6 +154,12 @@ const accessHint = computed(() => ({
   passthrough: '设备上报自定义报文，用 JS 脚本解析',
   modbus: 'DTU 主动接入，平台按采集周期轮询 Modbus 点位'
 } as any)[form.accessMode])
+
+const frameHint = computed(() => ({
+  none: '每次 TCP 读取视为一帧（报文较短且发送间隔大时可用；公网环境建议配置组帧）',
+  delimiter: '按定界符切分数据帧，解决 TCP 粘包/拆包',
+  length: '按报文内长度字段切分数据帧，解决 TCP 粘包/拆包'
+} as any)[form.frameMode])
 
 // 协议切换时：非 TCP 不允许 Modbus，自动回退到物模型
 function onProtocolChange() {
@@ -136,6 +181,13 @@ async function loadForEdit() {
   form.secretMode = p.secretMode
   form.pollInterval = p.pollInterval || 60
   form.description = p.description
+  form.frameMode = p.frameMode || 'none'
+  form.frameDelimiter = p.frameDelimiter || ''
+  form.frameLenOffset = p.frameLenOffset || 0
+  form.frameLenSize = p.frameLenSize || 1
+  form.frameLenAdjust = p.frameLenAdjust || 0
+  form.heartbeatPacket = p.heartbeatPacket || ''
+  form.heartbeatReply = p.heartbeatReply || ''
   // 载入对应功能定义
   if (p.accessMode === 'thingmodel') {
     const tm = await api.getThingModel(p.id)

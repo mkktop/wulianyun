@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -33,16 +34,32 @@ func SetDeviceProperty(c *gin.Context) {
 		Fail(c, 400, "属性参数必须是非空 JSON 对象")
 		return
 	}
+
+	messageID := fmt.Sprintf("%d", time.Now().UnixNano())
 	s, err := service.UpdateShadowDesired(&d, params)
 	if err != nil {
 		Fail(c, 500, "更新影子失败")
 		return
 	}
+
+	// 记录 CommandRequest
+	cmdReq := model.CommandRequest{
+		MessageID:  messageID,
+		UserID:     UID(c),
+		DeviceID:   d.ID,
+		DeviceName: d.Name,
+		Method:     "property.set",
+		Payload:    func() string { b, _ := json.Marshal(params); return string(b) }(),
+		Status:     "pending",
+		TimeoutMs:  10000,
+	}
+	repository.DB.Create(&cmdReq)
+
 	msg := "已下发"
 	if d.Status != model.DeviceStatusOnline {
 		msg = "设备离线，已写入影子待上线补发"
 	}
-	OK(c, gin.H{"shadow": s, "delivered": d.Status == model.DeviceStatusOnline, "note": msg})
+	OK(c, gin.H{"shadow": s, "delivered": d.Status == model.DeviceStatusOnline, "note": msg, "messageId": messageID})
 }
 
 // InvokeService 服务调用：按物模型服务标识符下发
@@ -64,15 +81,33 @@ func InvokeService(c *gin.Context) {
 		Fail(c, 400, "服务标识符必填")
 		return
 	}
+
+	messageID := fmt.Sprintf("%d", time.Now().UnixNano())
 	payload, _ := json.Marshal(map[string]interface{}{
-		"method":  "service.invoke",
-		"service": req.Service,
-		"params":  req.Params,
-		"ts":      time.Now().UnixMilli(),
+		"method":    "service.invoke",
+		"messageId": messageID,
+		"service":   req.Service,
+		"params":    req.Params,
+		"ts":        time.Now().UnixMilli(),
 	})
+
+	// 记录 CommandRequest
+	cmdReq := model.CommandRequest{
+		MessageID:  messageID,
+		UserID:     UID(c),
+		DeviceID:   d.ID,
+		DeviceName: d.Name,
+		Method:     "service.invoke",
+		Service:    req.Service,
+		Payload:    string(payload),
+		Status:     "pending",
+		TimeoutMs:  10000,
+	}
+	repository.DB.Create(&cmdReq)
+
 	if err := service.DownPublisher(d.ProductKey, d.Name, payload); err != nil {
 		Fail(c, 500, "下发失败: "+err.Error())
 		return
 	}
-	OK(c, nil)
+	OK(c, gin.H{"messageId": messageID})
 }

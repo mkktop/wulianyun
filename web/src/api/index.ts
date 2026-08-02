@@ -45,6 +45,15 @@ export interface Product {
   description: string
   deviceCount: number
   createdAt: string
+  // TCP 组帧/心跳
+  frameMode: string
+  frameDelimiter: string
+  frameLenOffset: number
+  frameLenSize: number
+  frameLenAdjust: number
+  heartbeatPacket: string
+  heartbeatReply: string
+  configVersion: number
 }
 
 export interface TslEnumItem {
@@ -100,11 +109,14 @@ export interface Device {
   productName: string
   name: string
   secret: string
+  regCode: string
   status: string
   groupId: number
   groupName: string
   tags: string[] | string
   remark: string
+  isGateway: boolean
+  gatewayId?: number
   lastOnlineAt: string | null
   lastOfflineAt: string | null
   createdAt: string
@@ -162,6 +174,7 @@ export interface Alarm {
   status: string
   createdAt: string
   resolvedAt: string | null
+  confirmedAt: string | null
 }
 
 export interface OpenApp {
@@ -260,7 +273,9 @@ export const api = {
 
   listAlarms: (params?: any) => http.get('/alarms', { params }) as Promise<Page<Alarm>>,
   resolveAlarm: (id: number) => http.post(`/alarms/${id}/resolve`),
-  alarmStats: () => http.get('/alarms/stats') as Promise<{ firing: number; today: number }>,
+  confirmAlarm: (id: number) => http.post(`/alarms/${id}/confirm`),
+  alarmStats: () => http.get('/alarms/stats') as Promise<{ total: number; firing: number; resolved: number; today: number }>,
+  alarmTrend: () => http.get('/alarms/trend') as Promise<{ day: string; count: number }[]>,
 
   getCodec: (productId: number | string) => http.get(`/products/${productId}/codec`) as Promise<{ script: string }>,
   saveCodec: (productId: number | string, script: string) => http.put(`/products/${productId}/codec`, { script }),
@@ -273,6 +288,13 @@ export const api = {
   deleteApp: (id: number) => http.delete(`/apps/${id}`),
 
   productStats: (id: number | string) => http.get(`/products/${id}/stats`) as Promise<any>,
+  getRemoteConfig: (id: number | string) =>
+    http.get(`/products/${id}/config`) as Promise<{ version: number; config: Record<string, any> }>,
+  saveRemoteConfig: (id: number | string, config: Record<string, any>) =>
+    http.put(`/products/${id}/config`, { config }) as Promise<{ version: number }>,
+  pushRemoteConfig: (id: number | string) => http.post(`/products/${id}/config/push`),
+  broadcastProduct: (id: number | string, payload: Record<string, any>) =>
+    http.post(`/products/${id}/broadcast`, { payload }),
   batchCreateDevices: (productId: number | string, names: string[]) =>
     http.post(`/products/${productId}/devices/batch`, { names }) as Promise<{ created: number; failed: { name: string; reason: string }[] }>,
 
@@ -282,5 +304,55 @@ export const api = {
   listGroups: () => http.get('/groups') as Promise<DeviceGroup[]>,
   createGroup: (data: any) => http.post('/groups', data) as Promise<DeviceGroup>,
   updateGroup: (id: number, data: any) => http.put(`/groups/${id}`, data),
-  deleteGroup: (id: number) => http.delete(`/groups/${id}`)
+  deleteGroup: (id: number) => http.delete(`/groups/${id}`),
+
+  // 设备模拟器
+  simulator: {
+    connect: (data: { productId: number; deviceId: number }) => http.post('/simulator/connect', data),
+    publish: (data: { sessionId: string; payload: any }) => http.post('/simulator/publish', data),
+    disconnect: (sessionId: string) => http.post('/simulator/disconnect', { sessionId }),
+    sessions: () => http.get('/simulator/sessions'),
+  },
+  // 消息轨迹
+  traces: {
+    list: (params: any) => http.get('/traces', { params }),
+    get: (traceId: string) => http.get(`/traces/${traceId}`),
+  },
+  // 设备日志
+  deviceLogs: {
+    list: (deviceId: number, params: any) => http.get(`/devices/${deviceId}/logs`, { params }),
+    listAll: (params: any) => http.get('/device-logs', { params }),
+  },
+  // MQTT 调试台（WebSocket 直连，此处仅保留占位）
+  mqttDebug: {
+    wsUrl: '/api/v1/mqtt-debug/ws',
+  },
+  // 物模型导入/导出
+  tsl: {
+    export: (productId: number) => http.get(`/products/${productId}/tsl/export`, { responseType: 'blob' }),
+    import: (productId: number, file: File) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      return http.post(`/products/${productId}/tsl/import`, fd)
+    },
+  },
+  // 统计
+  stats: {
+    overview: () => http.get('/stats/overview'),
+    messageTrend: (params: any) => http.get('/stats/message-trend', { params }),
+  },
+  // OTA 固件升级
+  ota: {
+    firmwares: (params?: any) => http.get('/firmwares', { params }),
+    uploadFirmware: (data: FormData) => http.post('/firmwares', data),
+    deleteFirmware: (id: number) => http.delete(`/firmwares/${id}`),
+    createTask: (data: any) => http.post('/ota-tasks', data),
+    tasks: () => http.get('/ota-tasks'),
+  },
+  // 网关子设备
+  gateway: {
+    subDevices: (gatewayId: number) => http.get(`/devices/${gatewayId}/sub-devices`),
+    addSubDevice: (gatewayId: number, data: any) => http.post(`/devices/${gatewayId}/sub-devices`, data),
+    removeSubDevice: (gatewayId: number, deviceId: number) => http.delete(`/devices/${gatewayId}/sub-devices/${deviceId}`),
+  },
 }

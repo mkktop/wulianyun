@@ -24,9 +24,18 @@
         <el-menu-item index="/apps">
           <el-icon><Key /></el-icon><span>应用管理</span>
         </el-menu-item>
+        <el-menu-item index="/ota">
+          <el-icon><UploadFilled /></el-icon><span>OTA升级</span>
+        </el-menu-item>
         <el-menu-item index="/screen">
           <el-icon><DataBoard /></el-icon><span>可视化大屏</span>
         </el-menu-item>
+        <el-sub-menu index="tools">
+          <template #title><el-icon><Monitor /></el-icon><span>开发工具</span></template>
+          <el-menu-item index="/tools/simulator">设备模拟器</el-menu-item>
+          <el-menu-item index="/tools/mqtt-debug">MQTT调试台</el-menu-item>
+          <el-menu-item index="/tools/traces">消息轨迹</el-menu-item>
+        </el-sub-menu>
       </el-menu>
     </el-aside>
     <el-container>

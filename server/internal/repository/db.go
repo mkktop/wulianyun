@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
@@ -27,13 +29,24 @@ func Init() error {
 	}
 	DB = db
 
+	// 配置数据库连接池
+	sqlDB, err := db.DB()
+	if err == nil {
+		sqlDB.SetMaxOpenConns(config.C.Database.MaxOpenConns)
+		sqlDB.SetMaxIdleConns(config.C.Database.MaxIdleConns)
+		sqlDB.SetConnMaxLifetime(time.Duration(config.C.Database.ConnMaxLifetime) * time.Second)
+		sqlDB.SetConnMaxIdleTime(time.Duration(config.C.Database.ConnMaxIdleTime) * time.Second)
+	}
+
 	if err := DB.AutoMigrate(
 		&model.User{}, &model.Product{}, &model.Device{},
 		&model.Telemetry{}, &model.DeviceEvent{},
 		&model.ThingModel{}, &model.DeviceShadow{}, &model.Rule{}, &model.Alarm{},
 		&model.OpenApp{}, &model.ModbusPoint{},
 		&model.EventReport{}, &model.CommandLog{}, &model.DeviceGroup{},
-		&model.ModbusGroup{},
+		&model.ModbusGroup{}, &model.CommandRequest{},
+		&model.MessageTrace{}, &model.DeviceLog{},
+		&model.Firmware{}, &model.OTATask{},
 	); err != nil {
 		return err
 	}
@@ -47,13 +60,76 @@ func Init() error {
 		slog.Warn("create_hypertable failed", "err", err)
 	}
 
+	// TimescaleDB 数据保留策略
+	retentionDays := config.C.Database.RetentionDays
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+	DB.Exec(fmt.Sprintf(
+		"SELECT add_retention_policy('telemetries', INTERVAL '%d days', if_not_exists => TRUE)",
+		retentionDays,
+	))
+
+	// TimescaleDB 压缩策略
+	compressAfter := config.C.Database.CompressAfterDays
+	if compressAfter <= 0 {
+		compressAfter = 7
+	}
+	DB.Exec("ALTER TABLE telemetries SET (timescaledb.compress, timescaledb.compress_segmentby = 'device_id')")
+	DB.Exec(fmt.Sprintf(
+		"SELECT add_compression_policy('telemetries', INTERVAL '%d days', if_not_exists => TRUE)",
+		compressAfter,
+	))
+
 	RDB = redis.NewClient(&redis.Options{
-		Addr:     config.C.Redis.Addr,
-		Password: config.C.Redis.Password,
-		DB:       config.C.Redis.DB,
+		Addr:         config.C.Redis.Addr,
+		Password:     config.C.Redis.Password,
+		DB:           config.C.Redis.DB,
+		PoolSize:     config.C.Redis.PoolSize,
+		MinIdleConns: config.C.Redis.MinIdleConns,
 	})
 	if err := RDB.Ping(context.Background()).Err(); err != nil {
 		slog.Warn("redis unavailable, latest-value cache disabled", "err", err)
 	}
+
+	// 启动定期清理例程
+	go cleanupLoop()
 	return nil
+}
+
+// cleanupLoop 定期清理消息轨迹和设备日志
+func cleanupLoop() {
+	traceDays := config.C.Log.TraceRetentionDays
+	if traceDays <= 0 {
+		traceDays = 7
+	}
+	logDays := config.C.Log.DeviceLogRetentionDays
+	if logDays <= 0 {
+		logDays = 30
+	}
+
+	// 启动后立即执行一次
+	doCleanup(traceDays, logDays)
+
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		doCleanup(traceDays, logDays)
+	}
+}
+
+func doCleanup(traceDays, logDays int) {
+	cutoff := time.Now().AddDate(0, 0, -traceDays)
+	if result := DB.Where("created_at < ?", cutoff).Delete(&model.MessageTrace{}); result.Error != nil {
+		slog.Warn("cleanup old traces failed", "err", result.Error)
+	} else if result.RowsAffected > 0 {
+		slog.Info("cleaned old traces", "count", result.RowsAffected, "older_than", cutoff)
+	}
+
+	cutoff2 := time.Now().AddDate(0, 0, -logDays)
+	if result := DB.Where("created_at < ?", cutoff2).Delete(&model.DeviceLog{}); result.Error != nil {
+		slog.Warn("cleanup old device logs failed", "err", result.Error)
+	} else if result.RowsAffected > 0 {
+		slog.Info("cleaned old device logs", "count", result.RowsAffected, "older_than", cutoff2)
+	}
 }

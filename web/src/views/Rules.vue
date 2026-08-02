@@ -29,6 +29,11 @@
           <el-text size="small" type="info">{{ condText(row) }}</el-text>
         </template>
       </el-table-column>
+      <el-table-column label="动作" min-width="120">
+        <template #default="{ row }">
+          <el-tag v-for="a in actionTags(row)" :key="a" size="small" style="margin-right:4px">{{ a }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="silence" label="静默(分)" width="90" />
       <el-table-column label="启用" width="80">
         <template #default="{ row }">
@@ -51,7 +56,25 @@
     />
   </el-card>
 
-  <el-dialog v-model="dialogVisible" :title="editing ? '编辑规则' : '创建规则'" width="560px">
+  <!-- 创建/编辑规则弹窗 -->
+  <el-dialog v-model="dialogVisible" :title="editing ? '编辑规则' : '创建规则'" width="680px" @open="onDialogOpen">
+    <!-- 一键模板（仅新建时显示） -->
+    <div v-if="!editing" class="tpl-section">
+      <div class="tpl-title">快捷模板</div>
+      <div class="tpl-cards">
+        <div v-for="tpl in templates" :key="tpl.key" class="tpl-card" @click="applyTemplate(tpl)">
+          <div class="tpl-icon" :style="{ background: tpl.bg, color: tpl.color }">
+            <el-icon :size="22"><component :is="tpl.icon" /></el-icon>
+          </div>
+          <div class="tpl-info">
+            <div class="tpl-name">{{ tpl.name }}</div>
+            <div class="tpl-desc">{{ tpl.desc }}</div>
+          </div>
+        </div>
+      </div>
+      <el-divider />
+    </div>
+
     <el-form :model="form" label-width="100px">
       <el-form-item label="规则名称" required>
         <el-input v-model="form.name" placeholder="如：高温告警" />
@@ -74,16 +97,32 @@
         </el-select>
       </el-form-item>
 
-      <!-- 阈值告警条件 -->
+      <!-- 阈值告警：复合条件编辑器 -->
       <template v-if="form.type === 'alarm'">
         <el-form-item label="触发条件" required>
-          <div class="cond-row">
-            <el-input v-model="form.field" placeholder="属性，如 temperature" style="width: 180px" />
-            <el-select v-model="form.op" style="width: 90px">
-              <el-option v-for="o in ['>', '<', '>=', '<=', '==', '!=']" :key="o" :label="o" :value="o" />
-            </el-select>
-            <el-input-number v-model="form.value" :controls="false" style="width: 120px" />
+          <!-- 逻辑切换 -->
+          <div class="cond-header">
+            <el-radio-group v-model="form.logic" size="small">
+              <el-radio-button value="and">满足全部 (AND)</el-radio-button>
+              <el-radio-button value="or">满足任一 (OR)</el-radio-button>
+            </el-radio-group>
           </div>
+          <!-- 条件列表 -->
+          <div class="cond-list">
+            <div v-for="(c, i) in form.conditions" :key="i" class="cond-item">
+              <el-input v-model="c.field" placeholder="属性，如 temperature" style="width: 160px" />
+              <el-select v-model="c.op" style="width: 80px">
+                <el-option v-for="o in ['>', '<', '>=', '<=', '==', '!=']" :key="o" :label="o" :value="o" />
+              </el-select>
+              <el-input-number v-model="c.value" :controls="false" style="width: 120px" />
+              <el-button link type="danger" @click="removeCondition(i)" :disabled="form.conditions.length <= 1">
+                <el-icon><Delete /></el-icon>
+              </el-button>
+            </div>
+          </div>
+          <el-button link type="primary" @click="addCondition">
+            <el-icon><Plus /></el-icon>&nbsp;添加条件
+          </el-button>
         </el-form-item>
         <el-form-item label="告警级别">
           <el-radio-group v-model="form.level">
@@ -98,10 +137,46 @@
         <el-input-number v-model="form.minutes" :min="1" :max="1440" /> &nbsp;分钟
       </el-form-item>
 
-      <!-- Webhook（转发必填，告警可选） -->
-      <el-form-item :label="form.type === 'forward' ? '转发地址' : 'Webhook'" :required="form.type === 'forward'">
-        <el-input v-model="form.webhookUrl" placeholder="http:// 或 https:// 通知地址（可选）" />
+      <!-- 动作区：多选 -->
+      <el-form-item label="触发动作">
+        <el-checkbox-group v-model="form.actions">
+          <el-checkbox value="alarm">站内告警</el-checkbox>
+          <el-checkbox value="webhook">Webhook转发</el-checkbox>
+          <el-checkbox value="kafka">Kafka</el-checkbox>
+          <el-checkbox value="mqtt_bridge">MQTT桥接</el-checkbox>
+        </el-checkbox-group>
       </el-form-item>
+
+      <!-- Webhook URL -->
+      <el-form-item v-if="form.actions.includes('webhook')" label="Webhook URL">
+        <el-input v-model="form.webhookUrl" placeholder="http:// 或 https:// 通知地址" />
+      </el-form-item>
+
+      <!-- Kafka 配置 -->
+      <template v-if="form.actions.includes('kafka')">
+        <el-form-item label="Kafka Brokers">
+          <el-input v-model="form.kafkaBrokers" placeholder="broker1:9092,broker2:9092" />
+        </el-form-item>
+        <el-form-item label="Kafka Topic">
+          <el-input v-model="form.kafkaTopic" placeholder="如：iot-telemetry" />
+        </el-form-item>
+      </template>
+
+      <!-- MQTT 桥接配置 -->
+      <template v-if="form.actions.includes('mqtt_bridge')">
+        <el-form-item label="MQTT Broker">
+          <el-input v-model="form.mqttBroker" placeholder="如：tcp://broker.example.com:1883" />
+        </el-form-item>
+        <el-form-item label="MQTT Topic">
+          <el-input v-model="form.mqttTopic" placeholder="如：/sync/data" />
+        </el-form-item>
+        <el-form-item label="用户名">
+          <el-input v-model="form.mqttUsername" placeholder="可选" />
+        </el-form-item>
+        <el-form-item label="密码">
+          <el-input v-model="form.mqttPassword" type="password" placeholder="可选" show-password />
+        </el-form-item>
+      </template>
 
       <el-form-item label="静默期(分)">
         <el-input-number v-model="form.silence" :min="1" :max="1440" />
@@ -115,7 +190,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, type Device, type Product, type Rule } from '../api'
 
@@ -131,10 +206,59 @@ const dialogVisible = ref(false)
 const saving = ref(false)
 const editing = ref<Rule | null>(null)
 
+interface CondItem { field: string; op: string; value: number }
+
 const form = reactive({
   name: '', type: 'alarm', productId: undefined as number | undefined, deviceId: undefined as number | undefined,
-  field: '', op: '>', value: 0, level: 'warning', minutes: 10, webhookUrl: '', silence: 5
+  logic: 'and' as 'and' | 'or',
+  conditions: [] as CondItem[],
+  level: 'warning', minutes: 10,
+  actions: ['alarm'] as string[],
+  webhookUrl: '',
+  kafkaBrokers: '', kafkaTopic: '',
+  mqttBroker: '', mqttTopic: '', mqttUsername: '', mqttPassword: '',
+  silence: 5
 })
+
+// ---- 一键模板 ----
+const templates = [
+  {
+    key: 'high_temp', name: '高温告警', desc: '温度 > 50℃ 时触发严重告警',
+    icon: 'Sunny', color: '#F56C6C', bg: '#fef0f0',
+    apply: () => Object.assign(form, {
+      name: '高温告警', type: 'alarm', logic: 'and',
+      conditions: [{ field: 'temperature', op: '>', value: 50 }],
+      level: 'critical', actions: ['alarm'], silence: 5
+    })
+  },
+  {
+    key: 'offline', name: '设备离线', desc: '设备离线超过 10 分钟告警',
+    icon: 'OfflinePin', color: '#E6A23C', bg: '#fdf6ec',
+    apply: () => Object.assign(form, {
+      name: '设备离线告警', type: 'offline', minutes: 10, level: 'warning', actions: ['alarm'], silence: 10
+    })
+  },
+  {
+    key: 'custom', name: '自定义规则', desc: '自由配置条件，灵活转发',
+    icon: 'Edit', color: '#409EFF', bg: '#ecf5ff',
+    apply: () => Object.assign(form, {
+      name: '', type: 'alarm', logic: 'and',
+      conditions: [{ field: '', op: '>', value: 0 }],
+      level: 'warning', actions: ['alarm'], silence: 5
+    })
+  }
+]
+
+function applyTemplate(tpl: typeof templates[number]) {
+  tpl.apply()
+}
+
+function addCondition() {
+  form.conditions.push({ field: '', op: '>', value: 0 })
+}
+function removeCondition(i: number) {
+  form.conditions.splice(i, 1)
+}
 
 async function load() {
   loading.value = true
@@ -155,6 +279,111 @@ async function onProductChange() {
   }
 }
 
+function resetForm() {
+  Object.assign(form, {
+    name: '', type: 'alarm', productId: undefined, deviceId: undefined,
+    logic: 'and', conditions: [{ field: '', op: '>', value: 0 }],
+    level: 'warning', minutes: 10, actions: ['alarm'],
+    webhookUrl: '', kafkaBrokers: '', kafkaTopic: '',
+    mqttBroker: '', mqttTopic: '', mqttUsername: '', mqttPassword: '',
+    silence: 5
+  })
+}
+
+function parseConditionToForm(cond: any) {
+  if (!cond) {
+    form.conditions = [{ field: '', op: '>', value: 0 }]
+    form.logic = 'and'
+    return
+  }
+  // 复合条件格式: {logic: "and", conditions: [...]}
+  if (cond.logic && Array.isArray(cond.conditions)) {
+    form.logic = cond.logic
+    form.conditions = cond.conditions.map((c: any) => ({
+      field: c.field || '', op: c.op || '>', value: c.value ?? 0
+    }))
+    if (form.conditions.length === 0) form.conditions = [{ field: '', op: '>', value: 0 }]
+  } else {
+    // 旧格式单条件: {field, op, value}
+    form.logic = 'and'
+    form.conditions = [{ field: cond.field || '', op: cond.op || '>', value: cond.value ?? 0 }]
+  }
+}
+
+function parseActionToForm(action: any) {
+  if (!action) {
+    form.actions = ['alarm']
+    form.webhookUrl = ''
+    return
+  }
+  const acts: string[] = []
+  // 判断动作类型
+  const actionType = action.type || ''
+  if (actionType === 'kafka') acts.push('kafka')
+  if (actionType === 'mqtt_bridge') acts.push('mqtt_bridge')
+
+  const notify = action.notify || []
+  if (notify.includes('ws') || action.level) acts.push('alarm')
+  if (notify.includes('webhook') || action.webhookUrl) acts.push('webhook')
+
+  form.actions = acts.length > 0 ? acts : ['alarm']
+  form.webhookUrl = action.webhookUrl || ''
+  form.kafkaBrokers = (action.brokers || []).join(',')
+  form.kafkaTopic = action.topic || ''
+  form.mqttBroker = action.broker || ''
+  form.mqttTopic = action.topic || ''
+  form.mqttUsername = action.username || ''
+  form.mqttPassword = action.password || ''
+  form.level = action.level || 'warning'
+}
+
+function buildCondition(): any {
+  if (form.type === 'alarm') {
+    const validConds = form.conditions.filter(c => c.field)
+    if (validConds.length === 0) return {}
+    if (validConds.length === 1) {
+      return { field: validConds[0].field, op: validConds[0].op, value: validConds[0].value }
+    }
+    return {
+      logic: form.logic,
+      conditions: validConds.map(c => ({ field: c.field, op: c.op, value: c.value }))
+    }
+  }
+  if (form.type === 'offline') return { minutes: form.minutes }
+  return {}
+}
+
+function buildAction(): any {
+  const action: any = {}
+  const acts = form.actions
+
+  if (acts.includes('alarm')) {
+    action.level = form.level
+    action.notify = ['ws']
+  }
+
+  if (acts.includes('webhook')) {
+    action.webhookUrl = form.webhookUrl
+    action.notify = [...(action.notify || []), 'webhook']
+  }
+
+  if (acts.includes('kafka')) {
+    action.type = 'kafka'
+    action.brokers = form.kafkaBrokers.split(',').map(s => s.trim()).filter(Boolean)
+    action.topic = form.kafkaTopic
+  }
+
+  if (acts.includes('mqtt_bridge')) {
+    action.type = 'mqtt_bridge'
+    action.broker = form.mqttBroker
+    action.topic = form.mqttTopic
+    action.username = form.mqttUsername
+    action.password = form.mqttPassword
+  }
+
+  return action
+}
+
 function openDialog(row?: Rule) {
   editing.value = row || null
   if (row) {
@@ -163,40 +392,37 @@ function openDialog(row?: Rule) {
     form.productId = row.productId || undefined
     form.deviceId = row.deviceId || undefined
     form.silence = row.silence
-    const c = row.condition || {}
-    const a = row.action || {}
-    form.field = c.field || ''
-    form.op = c.op || '>'
-    form.value = c.value ?? 0
-    form.minutes = c.minutes || 10
-    form.level = a.level || 'warning'
-    form.webhookUrl = a.webhookUrl || ''
-    if (form.productId) onProductChange().then(() => { form.deviceId = row.deviceId || undefined })
+    form.minutes = row.condition?.minutes || 10
+    parseConditionToForm(row.condition)
+    parseActionToForm(row.action)
+    if (form.productId) {
+      onProductChange().then(() => { form.deviceId = row.deviceId || undefined })
+    }
   } else {
-    Object.assign(form, {
-      name: '', type: 'alarm', productId: undefined, deviceId: undefined,
-      field: '', op: '>', value: 0, level: 'warning', minutes: 10, webhookUrl: '', silence: 5
-    })
+    resetForm()
   }
   dialogVisible.value = true
 }
 
+function onDialogOpen() {
+  // 确保 ECharts / DOM 初始化完成后渲染
+  nextTick()
+}
+
 async function save() {
   if (!form.name) { ElMessage.warning('请输入规则名称'); return }
-  if (form.type === 'alarm' && !form.field) { ElMessage.warning('请输入触发条件属性'); return }
-  if (form.type === 'forward' && !form.webhookUrl) { ElMessage.warning('请输入转发地址'); return }
-
-  let condition: any = {}
-  let action: any = {}
-  if (form.type === 'alarm') {
-    condition = { field: form.field, op: form.op, value: form.value }
-    action = { level: form.level, notify: form.webhookUrl ? ['ws', 'webhook'] : ['ws'], webhookUrl: form.webhookUrl }
-  } else if (form.type === 'offline') {
-    condition = { minutes: form.minutes }
-    action = { level: form.level, notify: form.webhookUrl ? ['ws', 'webhook'] : ['ws'], webhookUrl: form.webhookUrl }
-  } else {
-    action = { webhookUrl: form.webhookUrl }
+  if (form.type === 'alarm' && !form.conditions.some(c => c.field)) {
+    ElMessage.warning('请至少配置一个触发条件'); return
   }
+  if (form.type === 'forward' && !form.actions.length) {
+    ElMessage.warning('请选择至少一个转发动作'); return
+  }
+  if (form.actions.includes('webhook') && !form.webhookUrl) {
+    ElMessage.warning('请输入 Webhook URL'); return
+  }
+
+  const condition = buildCondition()
+  const action = buildAction()
   const payload = {
     name: form.name, type: form.type,
     productId: form.productId || 0, deviceId: form.deviceId || 0,
@@ -237,11 +463,27 @@ function typeText(t: string) {
 function typeTag(t: string) {
   return ({ alarm: 'warning', offline: 'info', forward: 'success' } as any)[t] || 'info'
 }
-function condText(row: Rule) {
+function condText(row: Rule): string {
   const c = row.condition || {}
-  if (row.type === 'alarm') return `${c.field} ${c.op} ${c.value}`
+  if (row.type === 'alarm') {
+    if (c.logic && c.conditions) {
+      const parts = c.conditions.map((cond: any) => `${cond.field} ${cond.op} ${cond.value}`)
+      return parts.join(c.logic === 'or' ? ' 或 ' : ' 且 ')
+    }
+    return `${c.field || '?'} ${c.op || '?'} ${c.value ?? '?'}`
+  }
   if (row.type === 'offline') return `离线超过 ${c.minutes} 分钟`
-  return (row.action || {}).webhookUrl || '-'
+  return '-'
+}
+
+function actionTags(row: Rule): string[] {
+  const a = row.action || {}
+  const tags: string[] = []
+  if (a.level || (a.notify || []).includes('ws')) tags.push('告警')
+  if (a.webhookUrl || (a.notify || []).includes('webhook')) tags.push('Webhook')
+  if (a.type === 'kafka') tags.push('Kafka')
+  if (a.type === 'mqtt_bridge') tags.push('MQTT桥接')
+  return tags.length ? tags : ['-']
 }
 
 onMounted(async () => {
@@ -253,6 +495,27 @@ onMounted(async () => {
 
 <style scoped>
 .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; }
-.cond-row { display: flex; gap: 8px; }
 .pager { margin-top: 16px; justify-content: flex-end; }
+
+/* 条件编辑器 */
+.cond-header { margin-bottom: 12px; }
+.cond-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.cond-item { display: flex; align-items: center; gap: 8px; }
+
+/* 模板卡片 */
+.tpl-section { margin-bottom: 4px; }
+.tpl-title { font-weight: 600; font-size: 14px; color: #303133; margin-bottom: 12px; }
+.tpl-cards { display: flex; gap: 12px; }
+.tpl-card {
+  flex: 1; display: flex; align-items: center; gap: 12px; padding: 14px;
+  border: 1px solid #e4e7ed; border-radius: 8px; cursor: pointer; transition: all 0.2s;
+}
+.tpl-card:hover { border-color: #409EFF; box-shadow: 0 2px 8px rgba(64,158,255,0.12); }
+.tpl-icon {
+  width: 42px; height: 42px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.tpl-info { min-width: 0; }
+.tpl-name { font-weight: 600; font-size: 13px; color: #303133; }
+.tpl-desc { font-size: 12px; color: #909399; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>

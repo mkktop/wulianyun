@@ -2,12 +2,12 @@ services:
   postgres:
     image: timescale/timescaledb:latest-pg16
     container_name: iot-postgres
+    # host 网络：镜像网络模式下与 Windows localhost 互通
+    network_mode: host
     environment:
       POSTGRES_USER: iot
       POSTGRES_PASSWORD: iot123456
       POSTGRES_DB: iot
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
@@ -15,8 +15,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: iot-redis
-    ports:
-      - "6379:6379"
+    # host 网络：镜像网络模式下与 Windows localhost 互通
+    network_mode: host
     restart: unless-stopped
 
   emqx:

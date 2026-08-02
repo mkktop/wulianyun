@@ -25,10 +25,10 @@ type Client struct {
 // Hub 推送中心
 type Hub struct {
 	mu      sync.RWMutex
-	clients map[*Client]bool
+	clients map[uint]map[*Client]bool // userID -> set of clients
 }
 
-var H = &Hub{clients: map[*Client]bool{}}
+var H = &Hub{clients: map[uint]map[*Client]bool{}}
 
 type inMsg struct {
 	Type     string `json:"type"` // subscribe / unsubscribe
@@ -50,7 +50,10 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, userID uint) {
 	}
 	c := &Client{conn: conn, userID: userID, send: make(chan []byte, 64), deviceIDs: map[uint]bool{}}
 	h.mu.Lock()
-	h.clients[c] = true
+	if h.clients[c.userID] == nil {
+		h.clients[c.userID] = map[*Client]bool{}
+	}
+	h.clients[c.userID][c] = true
 	h.mu.Unlock()
 
 	go c.writeLoop()
@@ -60,7 +63,12 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, userID uint) {
 func (c *Client) readLoop(h *Hub) {
 	defer func() {
 		h.mu.Lock()
-		delete(h.clients, c)
+		if m, ok := h.clients[c.userID]; ok {
+			delete(m, c)
+			if len(m) == 0 {
+				delete(h.clients, c.userID)
+			}
+		}
 		h.mu.Unlock()
 		close(c.send)
 		c.conn.Close()
@@ -116,11 +124,9 @@ func (h *Hub) PushEvent(userID uint, payload interface{}) {
 func (h *Hub) push(userID uint, onlyDevice *uint, msg OutMsg) {
 	data, _ := json.Marshal(msg)
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for c := range h.clients {
-		if c.userID != userID {
-			continue
-		}
+	userClients := h.clients[userID]
+	h.mu.RUnlock()
+	for c := range userClients {
 		if onlyDevice != nil {
 			c.mu.RLock()
 			sub := c.deviceIDs[*onlyDevice]
