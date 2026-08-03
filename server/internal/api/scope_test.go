@@ -98,3 +98,15 @@ func TestUintPtr(t *testing.T) {
 		t.Errorf("uintPtr(42) 应返回指向 42 的指针")
 	}
 }
+
+// TestRouterBuilds 构造完整路由表：若读写分离后存在 gin 路由冲突，NewRouter 会 panic，此测试提前暴露。
+func TestRouterBuilds(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("NewRouter panic（可能是路由冲突）: %v", r)
+		}
+	}()
+	if r := NewRouter(); r == nil {
+		t.Fatal("NewRouter 返回 nil")
+	}
+}

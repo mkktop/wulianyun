@@ -17,6 +17,13 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="权限" width="90">
+        <template #default="{ row }">
+          <el-tag :type="row.permission === 'view' ? 'info' : 'success'" size="small">
+            {{ row.permission === 'view' ? '只读' : '可操作' }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="deviceCount" label="设备数" width="90" />
       <el-table-column prop="grantCount" label="已下放产品" width="110" />
       <el-table-column label="创建时间" width="120">
@@ -48,6 +55,12 @@
         <el-form-item label="密码" prop="password">
           <el-input v-model="createForm.password" type="password" show-password placeholder="初始密码（≥6位）" />
         </el-form-item>
+        <el-form-item label="权限" prop="permission">
+          <el-select v-model="createForm.permission" style="width: 100%">
+            <el-option label="可操作（管理设备/下发指令）" value="operate" />
+            <el-option label="只读（仅查看）" value="view" />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="createVisible = false">取消</el-button>
@@ -60,6 +73,12 @@
       <el-form label-width="80px">
         <el-form-item label="用户名"><el-input :model-value="editForm.username" disabled /></el-form-item>
         <el-form-item label="昵称"><el-input v-model="editForm.nickname" /></el-form-item>
+        <el-form-item label="权限">
+          <el-select v-model="editForm.permission" style="width: 100%">
+            <el-option label="可操作（管理设备/下发指令）" value="operate" />
+            <el-option label="只读（仅查看）" value="view" />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
@@ -90,7 +109,7 @@ async function load() {
 const createVisible = ref(false)
 const creating = ref(false)
 const createFormRef = ref<FormInstance>()
-const createForm = reactive({ username: '', nickname: '', password: '' })
+const createForm = reactive({ username: '', nickname: '', password: '', permission: 'operate' })
 const createRules: FormRules = {
   username: [{ required: true, min: 3, max: 32, message: '用户名 3-32 位', trigger: 'blur' }],
   password: [{ required: true, min: 6, max: 64, message: '密码至少 6 位', trigger: 'blur' }],
@@ -99,6 +118,7 @@ function openCreate() {
   createForm.username = ''
   createForm.nickname = ''
   createForm.password = ''
+  createForm.permission = 'operate'
   createVisible.value = true
 }
 async function doCreate() {
@@ -120,17 +140,18 @@ async function doCreate() {
 // 编辑昵称
 const editVisible = ref(false)
 const editSaving = ref(false)
-const editForm = reactive({ id: 0, username: '', nickname: '' })
+const editForm = reactive({ id: 0, username: '', nickname: '', permission: 'operate' })
 function openEdit(row: Account) {
   editForm.id = row.id
   editForm.username = row.username
   editForm.nickname = row.nickname
+  editForm.permission = row.permission || 'operate'
   editVisible.value = true
 }
 async function doEdit() {
   editSaving.value = true
   try {
-    await api.updateAccount(editForm.id, { nickname: editForm.nickname })
+    await api.updateAccount(editForm.id, { nickname: editForm.nickname, permission: editForm.permission })
     ElMessage.success('已保存')
     editVisible.value = false
     load()

@@ -19,8 +19,8 @@
         </el-input>
       </div>
       <div>
-        <el-button @click="groupMgrVisible = true">分组管理</el-button>
-        <el-button type="primary" @click="dialogVisible = true">
+        <el-button v-if="!viewOnly" @click="groupMgrVisible = true">分组管理</el-button>
+        <el-button v-if="!viewOnly" type="primary" @click="dialogVisible = true">
           <el-icon><Plus /></el-icon>&nbsp;添加设备
         </el-button>
       </div>
@@ -53,11 +53,11 @@
       <el-table-column label="操作" width="210" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="$router.push(`/devices/${row.id}`)">详情</el-button>
-          <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button link type="warning" size="small" @click="toggleDisable(row)">
+          <el-button v-if="!viewOnly" link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button v-if="!viewOnly" link type="warning" size="small" @click="toggleDisable(row)">
             {{ row.status === 'disabled' ? '启用' : '禁用' }}
           </el-button>
-          <el-popconfirm title="确定删除该设备？" @confirm="del(row)">
+          <el-popconfirm v-if="!viewOnly" title="确定删除该设备？" @confirm="del(row)">
             <template #reference><el-button link type="danger" size="small">删除</el-button></template>
           </el-popconfirm>
         </template>
@@ -148,8 +148,10 @@
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { api, type Device, type DeviceGroup, type Product } from '../api'
+import { api, type Device, type DeviceGroup, type Product, isViewOnly } from '../api'
 import { realtime } from '../utils/realtime'
+
+const viewOnly = isViewOnly()
 
 const route = useRoute()
 const list = ref<Device[]>([])

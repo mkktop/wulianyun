@@ -13,9 +13,10 @@ import (
 //   - 产品下放（/products/:id/grants）仅产品 owner/超管可操作（mustOwnProduct）
 
 type accountCreateReq struct {
-	Username string `json:"username" binding:"required,min=3,max=32"`
-	Password string `json:"password" binding:"required,min=6,max=64"`
-	Nickname string `json:"nickname"`
+	Username   string `json:"username" binding:"required,min=3,max=32"`
+	Password   string `json:"password" binding:"required,min=6,max=64"`
+	Nickname   string `json:"nickname"`
+	Permission string `json:"permission"` // operate(可操作) / view(只读)，默认 operate
 }
 
 // ListAccounts 一级列出自己名下的二级账号（附设备数/下放产品数）
@@ -51,10 +52,15 @@ func CreateAccount(c *gin.Context) {
 		return
 	}
 	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	perm := req.Permission
+	if perm != model.AccountPermissionView {
+		perm = model.AccountPermissionOperate
+	}
 	u := model.User{
 		Username: req.Username, PasswordHash: string(hash),
 		Nickname: req.Nickname, Role: "user",
 		ParentID: uintPtr(UID(c)), Status: model.AccountStatusActive,
+		Permission: perm,
 	}
 	if u.Nickname == "" {
 		u.Nickname = req.Username
@@ -67,9 +73,10 @@ func CreateAccount(c *gin.Context) {
 }
 
 type accountUpdateReq struct {
-	Nickname *string `json:"nickname"`
-	Password *string `json:"password"` // 重置密码
-	Status   *string `json:"status"`   // active / disabled
+	Nickname   *string `json:"nickname"`
+	Password   *string `json:"password"`   // 重置密码
+	Status     *string `json:"status"`     // active / disabled
+	Permission *string `json:"permission"` // operate / view
 }
 
 // UpdateAccount 一级修改二级账号（昵称/重置密码/禁用启用）
@@ -102,6 +109,13 @@ func UpdateAccount(c *gin.Context) {
 			return
 		}
 		updates["status"] = *req.Status
+	}
+	if req.Permission != nil {
+		if *req.Permission != model.AccountPermissionOperate && *req.Permission != model.AccountPermissionView {
+			Fail(c, 400, "权限非法")
+			return
+		}
+		updates["permission"] = *req.Permission
 	}
 	repository.DB.Model(&u).Updates(updates)
 	OK(c, u)

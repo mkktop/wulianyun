@@ -62,6 +62,7 @@ async function submit() {
       localStorage.setItem('token', token)
       localStorage.setItem('username', user.nickname || user.username)
       localStorage.setItem('tier', computeTier(user))
+      localStorage.setItem('perm', user.permission || 'operate')
       router.push('/')
     }
   } finally {

@@ -63,6 +63,9 @@
         </el-dropdown>
       </el-header>
       <el-main class="main">
+        <el-alert v-if="perm === 'view'" type="warning" :closable="false" style="margin-bottom: 12px">
+          当前为只读账号：仅可查看数据，无法执行新增、修改、删除、下发等操作
+        </el-alert>
         <router-view />
       </el-main>
     </el-container>
@@ -113,17 +116,18 @@ function onMsg(msg: any) {
 }
 
 const tier = ref(localStorage.getItem('tier') || 'primary')
+const perm = ref(localStorage.getItem('perm') || 'operate')
 
 onMounted(async () => {
   realtime.on(onMsg)
-  // 兼容旧会话：tier 缺失则拉 profile 补全
-  if (!localStorage.getItem('tier')) {
-    try {
-      const p = await api.profile()
-      tier.value = p.tier || 'primary'
-      localStorage.setItem('tier', tier.value)
-    } catch { /* ignore */ }
-  }
+  // 拉取最新 tier/权限：管理员调整二级权限后，二级刷新页面即生效
+  try {
+    const p = await api.profile()
+    tier.value = p.tier || 'primary'
+    perm.value = p.permission || 'operate'
+    localStorage.setItem('tier', tier.value)
+    localStorage.setItem('perm', perm.value)
+  } catch { /* ignore */ }
 })
 onUnmounted(() => realtime.off(onMsg))
 
@@ -180,6 +184,7 @@ function onCommand(cmd: string) {
     localStorage.removeItem('token')
     localStorage.removeItem('username')
     localStorage.removeItem('tier')
+    localStorage.removeItem('perm')
     router.push('/login')
   }
 }

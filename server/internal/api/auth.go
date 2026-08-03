@@ -79,13 +79,14 @@ func Profile(c *gin.Context) {
 		return
 	}
 	OK(c, gin.H{
-		"id":       user.ID,
-		"username": user.Username,
-		"nickname": user.Nickname,
-		"role":     user.Role,
-		"parentId": user.ParentID,
-		"tier":     Tier(c),
-		"status":   user.Status,
+		"id":         user.ID,
+		"username":   user.Username,
+		"nickname":   user.Nickname,
+		"role":       user.Role,
+		"parentId":   user.ParentID,
+		"tier":       Tier(c),
+		"status":     user.Status,
+		"permission": user.Permission,
 	})
 }
 

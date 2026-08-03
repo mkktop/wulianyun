@@ -36,69 +36,94 @@ func NewRouter() *gin.Engine {
 			auth.GET("/overview", Overview)
 			auth.GET("/ws", WSHandler)
 
-			auth.POST("/products", CreateProduct)
+			// ---- 只读接口 ----
 			auth.GET("/products", ListProducts)
 			auth.GET("/products/:id", GetProduct)
-			auth.PUT("/products/:id", UpdateProduct)
-			auth.DELETE("/products/:id", DeleteProduct)
 			auth.GET("/products/:id/thing-model", GetThingModel)
-			auth.PUT("/products/:id/thing-model", SaveThingModel)
 			auth.GET("/products/:id/tsl/export", ExportThingModel)
-			auth.POST("/products/:id/tsl/import", ImportThingModel)
+			auth.POST("/products/:id/codec/test", TestCodec) // 测试解析，不产生变更
 			auth.GET("/products/:id/codec", GetCodec)
-			auth.PUT("/products/:id/codec", SaveCodec)
-			auth.POST("/products/:id/codec/test", TestCodec)
 			auth.GET("/products/:id/modbus-points", GetModbusPoints)
-			auth.PUT("/products/:id/modbus-points", SaveModbusPoints)
-			auth.POST("/products/:id/modbus-points/test", TestModbusPoint)
+			auth.POST("/products/:id/modbus-points/test", TestModbusPoint) // 测试解析，不产生变更
 			auth.GET("/products/:id/modbus-groups", ListModbusGroups)
-			auth.POST("/products/:id/modbus-groups", CreateModbusGroup)
-			auth.PUT("/products/:id/modbus-groups/:gid", UpdateModbusGroup)
-			auth.DELETE("/products/:id/modbus-groups/:gid", DeleteModbusGroup)
 			auth.GET("/products/:id/stats", ProductStats)
 			auth.GET("/products/:id/device-alarm-stats", DeviceAlarmStats)
 			auth.GET("/products/:id/config", GetRemoteConfig)
-			auth.PUT("/products/:id/config", SaveRemoteConfig)
-			auth.POST("/products/:id/config/push", PushRemoteConfig)
-			auth.POST("/products/:id/broadcast", BroadcastProduct)
-			auth.POST("/products/:id/devices/batch", BatchCreateDevices)
 
-			auth.POST("/devices", CreateDevice)
 			auth.GET("/devices", ListDevices)
 			auth.GET("/devices/:id", GetDevice)
-			auth.PUT("/devices/:id", UpdateDevice)
-			auth.DELETE("/devices/:id", DeleteDevice)
 			auth.GET("/devices/:id/events", ListDeviceEvents)
 			auth.GET("/devices/:id/latest", DeviceLatest)
 			auth.GET("/devices/:id/history", DeviceHistory)
-			auth.POST("/devices/:id/command", SendCommand)
 			auth.GET("/devices/:id/shadow", GetDeviceShadow)
-			auth.POST("/devices/:id/property", SetDeviceProperty)
-			auth.POST("/devices/:id/service", InvokeService)
 
-			auth.POST("/rules", CreateRule)
 			auth.GET("/rules", ListRules)
-			auth.PUT("/rules/:id", UpdateRule)
-			auth.DELETE("/rules/:id", DeleteRule)
 
 			auth.GET("/alarms", ListAlarms)
-			auth.POST("/alarms/:id/resolve", ResolveAlarm)
-			auth.POST("/alarms/:id/confirm", ConfirmAlarm)
 			auth.GET("/alarms/stats", AlarmStats)
 			auth.GET("/alarms/trend", AlarmTrend)
 
-			auth.POST("/apps", CreateOpenApp)
 			auth.GET("/apps", ListOpenApps)
-			auth.PUT("/apps/:id", UpdateOpenApp)
-			auth.DELETE("/apps/:id", DeleteOpenApp)
-
 			auth.GET("/event-reports", ListEventReports)
 			auth.GET("/command-logs", ListCommandLogs)
-
-			auth.POST("/groups", CreateGroup)
 			auth.GET("/groups", ListGroups)
-			auth.PUT("/groups/:id", UpdateGroup)
-			auth.DELETE("/groups/:id", DeleteGroup)
+
+			auth.GET("/traces", ListTraces)
+			auth.GET("/traces/:traceId", GetTrace)
+			auth.GET("/devices/:id/logs", ListDeviceLogs)
+			auth.GET("/device-logs", ListAllDeviceLogs)
+			auth.GET("/devices/:id/sub-devices", ListSubDevices)
+			auth.GET("/firmwares", ListFirmwares)
+			auth.GET("/ota-tasks", ListOTATasks)
+			auth.GET("/mqtt-debug/ws", MqttDebugWS)
+
+			// ---- 写操作（查看者账号被 RequireOperate 拦截）----
+			write := auth.Group("", RequireOperate())
+			{
+				write.POST("/products", CreateProduct)
+				write.PUT("/products/:id", UpdateProduct)
+				write.DELETE("/products/:id", DeleteProduct)
+				write.PUT("/products/:id/thing-model", SaveThingModel)
+				write.POST("/products/:id/tsl/import", ImportThingModel)
+				write.PUT("/products/:id/codec", SaveCodec)
+				write.PUT("/products/:id/modbus-points", SaveModbusPoints)
+				write.POST("/products/:id/modbus-groups", CreateModbusGroup)
+				write.PUT("/products/:id/modbus-groups/:gid", UpdateModbusGroup)
+				write.DELETE("/products/:id/modbus-groups/:gid", DeleteModbusGroup)
+				write.PUT("/products/:id/config", SaveRemoteConfig)
+				write.POST("/products/:id/config/push", PushRemoteConfig)
+				write.POST("/products/:id/broadcast", BroadcastProduct)
+				write.POST("/products/:id/devices/batch", BatchCreateDevices)
+
+				write.POST("/devices", CreateDevice)
+				write.PUT("/devices/:id", UpdateDevice)
+				write.DELETE("/devices/:id", DeleteDevice)
+				write.POST("/devices/:id/command", SendCommand)
+				write.POST("/devices/:id/property", SetDeviceProperty)
+				write.POST("/devices/:id/service", InvokeService)
+
+				write.POST("/rules", CreateRule)
+				write.PUT("/rules/:id", UpdateRule)
+				write.DELETE("/rules/:id", DeleteRule)
+
+				write.POST("/alarms/:id/resolve", ResolveAlarm)
+				write.POST("/alarms/:id/confirm", ConfirmAlarm)
+
+				write.POST("/apps", CreateOpenApp)
+				write.PUT("/apps/:id", UpdateOpenApp)
+				write.DELETE("/apps/:id", DeleteOpenApp)
+
+				write.POST("/groups", CreateGroup)
+				write.PUT("/groups/:id", UpdateGroup)
+				write.DELETE("/groups/:id", DeleteGroup)
+
+				write.POST("/devices/:id/sub-devices", AddSubDevice)
+				write.DELETE("/devices/:id/sub-devices/:subId", RemoveSubDevice)
+
+				write.POST("/firmwares", CreateFirmware)
+				write.DELETE("/firmwares/:id", DeleteFirmware)
+				write.POST("/ota-tasks", CreateOTATask)
+			}
 
 			// 账号管理 + 产品下放（仅一级主账号）
 			primary := auth.Group("", PrimaryAuth())
@@ -112,30 +137,12 @@ func NewRouter() *gin.Engine {
 				primary.DELETE("/products/:id/grants/:sid", DeleteGrant)
 			}
 
-			// 开发者工具
+			// 开发者工具（模拟器会产生下行/上报，属写操作）
 			sim := auth.Group("/simulator")
-			sim.POST("/connect", ConnectSimulator)
-			sim.POST("/publish", PublishSimulator)
-			sim.POST("/disconnect", DisconnectSimulator)
 			sim.GET("/sessions", ListSimulatorSessions)
-
-			auth.GET("/mqtt-debug/ws", MqttDebugWS)
-
-			auth.GET("/traces", ListTraces)
-			auth.GET("/traces/:traceId", GetTrace)
-
-			auth.GET("/devices/:id/logs", ListDeviceLogs)
-			auth.GET("/device-logs", ListAllDeviceLogs)
-
-			auth.GET("/devices/:id/sub-devices", ListSubDevices)
-			auth.POST("/devices/:id/sub-devices", AddSubDevice)
-			auth.DELETE("/devices/:id/sub-devices/:subId", RemoveSubDevice)
-
-			auth.GET("/firmwares", ListFirmwares)
-			auth.POST("/firmwares", CreateFirmware)
-			auth.DELETE("/firmwares/:id", DeleteFirmware)
-			auth.POST("/ota-tasks", CreateOTATask)
-			auth.GET("/ota-tasks", ListOTATasks)
+			sim.POST("/connect", RequireOperate(), ConnectSimulator)
+			sim.POST("/publish", RequireOperate(), PublishSimulator)
+			sim.POST("/disconnect", RequireOperate(), DisconnectSimulator)
 		}
 	}
 

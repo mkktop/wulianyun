@@ -20,14 +20,21 @@ const (
 	AccountStatusDisabled = "disabled"
 )
 
+// 账号权限级别（P2 账号内 RBAC）：一级/超管恒为可写；二级账号可选 operate/view
+const (
+	AccountPermissionOperate = "operate" // 可操作：创建设备、下发指令、管理规则等
+	AccountPermissionView    = "view"    // 只读：仅查看，写操作被拒绝
+)
+
 type User struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
 	Username     string    `gorm:"size:64;uniqueIndex;not null" json:"username"`
 	PasswordHash string    `gorm:"size:128;not null" json:"-"`
 	Nickname     string    `gorm:"size:64" json:"nickname"`
 	Role         string    `gorm:"size:16;default:user" json:"role"` // admin=平台超管 / user=普通账号
-	ParentID     *uint     `gorm:"index" json:"parentId,omitempty"`  // 父账号 ID；nil=一级（独立主账号）；非空=二级
-	Status       string    `gorm:"size:16;default:active" json:"status"` // active / disabled
+	ParentID     *uint     `gorm:"index" json:"parentId,omitempty"`          // 父账号 ID；nil=一级（独立主账号）；非空=二级
+	Status       string    `gorm:"size:16;default:active" json:"status"`     // active / disabled
+	Permission   string    `gorm:"size:16;default:operate" json:"permission"` // operate / view（二级账号权限级别）
 	CreatedAt    time.Time `json:"createdAt"`
 }
 

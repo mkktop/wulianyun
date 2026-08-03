@@ -9,6 +9,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"iot-platform/internal/config"
+	"iot-platform/internal/model"
+	"iot-platform/internal/repository"
 )
 
 type Claims struct {
@@ -113,6 +115,25 @@ func PrimaryAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !IsPrimary(c) {
 			c.AbortWithStatusJSON(http.StatusForbidden, Resp{Code: 403, Msg: "仅一级主账号可操作"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// RequireOperate 写操作保护（P2 账号内 RBAC）。
+// 平台超管/一级主账号恒放行；二级账号按 Permission 判定，view（只读）拒绝。
+// 权限实时从库读取（管理员改权限即时生效，无需二级重新登录）。
+func RequireOperate() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if IsAdmin(c) || IsPrimary(c) {
+			c.Next()
+			return
+		}
+		var perm string
+		repository.DB.Model(&model.User{}).Where("id = ?", UID(c)).Pluck("permission", &perm)
+		if perm == model.AccountPermissionView {
+			c.AbortWithStatusJSON(http.StatusForbidden, Resp{Code: 403, Msg: "查看者账号无操作权限"})
 			return
 		}
 		c.Next()

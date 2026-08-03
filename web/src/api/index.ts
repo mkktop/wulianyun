@@ -193,6 +193,7 @@ export interface Account {
   role: string
   parentId?: number | null
   status: string
+  permission: string
   createdAt: string
   deviceCount?: number
   grantCount?: number
@@ -219,6 +220,10 @@ export function currentTier(): string {
 }
 export function isSecondary(): boolean {
   return currentTier() === 'secondary'
+}
+// 只读账号（P2 账号内 RBAC）：无写操作权限，前端据此隐藏写按钮，后端 RequireOperate 兜底
+export function isViewOnly(): boolean {
+  return localStorage.getItem('perm') === 'view'
 }
 
 export interface EventReport {
