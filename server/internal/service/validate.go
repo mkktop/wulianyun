@@ -50,7 +50,7 @@ func ValidateTelemetry(productID uint, data map[string]interface{}) (bool, []str
 
 func validateField(name string, val interface{}, def map[string]interface{}) []string {
 	var errs []string
-	dataType, _ := def["type"].(string)
+	dataType, _ := def["dataType"].(string)
 
 	switch dataType {
 	case "int32":
