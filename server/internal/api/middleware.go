@@ -110,10 +110,11 @@ func Tier(c *gin.Context) string {
 // IsPrimary 一级主账号（可创建二级、下放产品）
 func IsPrimary(c *gin.Context) bool { return Tier(c) == "primary" }
 
-// PrimaryAuth 仅一级主账号可通过（账号管理、产品下放）
+// PrimaryAuth 一级主账号或平台超管可通过（账号管理、产品下放）。
+// 超管以自身为"主账号"创建/管理二级账号（parent_id=超管ID），便于平台运营与演示。
 func PrimaryAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !IsPrimary(c) {
+		if !IsAdmin(c) && !IsPrimary(c) {
 			c.AbortWithStatusJSON(http.StatusForbidden, Resp{Code: 403, Msg: "仅一级主账号可操作"})
 			return
 		}

@@ -81,11 +81,11 @@ func TestPrimaryAuthGate(t *testing.T) {
 		blocked bool
 	}{
 		{"二级被拦", "user", &pid, true},
-		{"超管被拦（PrimaryAuth 只放一级）", "admin", nil, true},
+		{"超管放行（以自身为主账号管理二级）", "admin", nil, false},
 		{"一级放行", "user", nil, false},
 	}
 	for _, tc := range cases {
-		blocked := !IsPrimary(makeCtx(1, tc.role, tc.pid))
+		blocked := !IsAdmin(makeCtx(1, tc.role, tc.pid)) && !IsPrimary(makeCtx(1, tc.role, tc.pid))
 		if blocked != tc.blocked {
 			t.Errorf("%s: 期望 blocked=%v 得到 %v", tc.name, tc.blocked, blocked)
 		}
