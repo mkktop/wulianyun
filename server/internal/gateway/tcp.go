@@ -1,4 +1,4 @@
-// Package gateway TCP 透传接入网关（对标有人云 DTU 场景）
+// Package gateway TCP 透传接入网关
 //
 // 接入流程：
 //  1. 设备连接后 10 秒内发送注册包：三元组 {productKey},{deviceName},{secret}\n

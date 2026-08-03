@@ -4,7 +4,7 @@ layout: home
 hero:
   name: KK 物联云
   text: 设备接入开发文档
-  tagline: 对标 OneNET / 天翼 / 有人云，三协议接入、物模型、规则引擎、OTA、开放平台
+  tagline: 三协议接入、物模型、规则引擎、OTA、开放平台，一站式物联网设备管理
   actions:
     - theme: brand
       text: 快速开始

@@ -2,7 +2,7 @@
   <div v-if="product">
     <el-page-header :content="product.name" @back="$router.push('/products')" style="margin-bottom: 16px" />
 
-    <!-- 产品信息卡（对齐天翼产品概况头部） -->
+    <!-- 产品信息卡 -->
     <el-card shadow="never">
       <div class="info-grid">
         <div class="info-main">

@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**KK物联云 (KK IoT Cloud)** — an IoT device management platform benchmarked against OneNET / CTWing(天翼) / 有人云. Monorepo with three parts:
+**KK物联云 (KK IoT Cloud)** — an enterprise IoT device management platform. Monorepo with three parts:
 
 - `server/` — Go backend (module `iot-platform`), the core platform
 - `web/` — Vue3 management console
 - `tools/simulator/` — Node.js device simulators (MQTT + DTU/TCP)
 
-Code comments, log messages, and user-facing strings are predominantly **Chinese** — match this convention in new code. The project deliberately mirrors the feature sets of the three reference platforms; recent commit history is the clearest record of feature parity work.
+Code comments, log messages, and user-facing strings are predominantly **Chinese** — match this convention in new code. The project targets comprehensive enterprise IoT feature coverage; recent commit history is the clearest record of feature work.
 
 ## Commands
 

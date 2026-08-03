@@ -101,7 +101,7 @@ export default defineConfig({
     darkModeSwitchTitle: '切换到深色模式',
 
     footer: {
-      message: '基于代码实现整理，如有出入以代码为准',
+      message: '内容持续更新，如有疑问请联系平台技术支持',
       copyright: 'KK 物联云 · 设备接入文档'
     }
   }

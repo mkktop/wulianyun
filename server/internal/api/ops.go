@@ -9,7 +9,7 @@ import (
 	"iot-platform/internal/repository"
 )
 
-// ProductStats 产品概况统计（对齐天翼产品概况页）
+// ProductStats 产品概况统计
 func ProductStats(c *gin.Context) {
 	var p model.Product
 	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {

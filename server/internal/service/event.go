@@ -97,7 +97,7 @@ func Broadcast(productKey string, payload []byte) error {
 	return Broadcaster(productKey, payload)
 }
 
-// handleNTPRequest 处理设备 NTP 对时请求（对标阿里 Alink）
+// handleNTPRequest 处理设备 NTP 对时请求
 // 上行: {"method":"ntp.request","deviceSendTime":<ms>}
 // 下行: {"method":"ntp.response","deviceSendTime","serverRecvTime","serverSendTime"}
 func handleNTPRequest(d *model.Device, data map[string]interface{}) {

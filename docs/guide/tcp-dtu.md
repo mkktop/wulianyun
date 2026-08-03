@@ -1,6 +1,6 @@
 # TCP 透传（DTU）接入协议
 
-> 平台在 **:9100** 提供 TCP 透传网关，对标有人云 DTU 场景：串口设备经 DTU 以 TCP 长连接接入，连接后先发**注册包**鉴权，再按产品组帧配置收发数据帧。支持三种数据模式：标准物模型 JSON、透传脚本（goja JS `decode/encode`）、Modbus 云端轮询。
+> 平台在 **:9100** 提供 TCP 透传网关，适用于串口设备经 DTU 以 TCP 长连接接入：连接后先发**注册包**鉴权，再按产品组帧配置收发数据帧。支持三种数据模式：标准物模型 JSON、透传脚本（goja JS `decode/encode`）、Modbus 云端轮询。
 >
 > 相关：组帧/脚本 → [物模型TSL](/guide/tsl) · 下行 → [下行控制与设备影子](/guide/downlink-shadow)
 

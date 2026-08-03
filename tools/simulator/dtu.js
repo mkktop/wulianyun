@@ -1,4 +1,4 @@
-// DTU 模拟器：模拟 TCP 透传设备（对标有人云 DTU）
+// DTU 模拟器：模拟 TCP 透传设备
 // 注册包: {productKey},{deviceName},{secret}\n → 平台回复 OK
 // 之后每 5 秒上报 4 字节二进制帧: int16BE 温度x10 + int16BE 湿度x10
 // 用法: node dtu.js <productKey> <deviceName> <deviceSecret> [host] [port]
