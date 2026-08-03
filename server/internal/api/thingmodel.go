@@ -68,8 +68,8 @@ type tslService struct {
 
 // GetThingModel 查询产品物模型（无则返回空模型）
 func GetThingModel(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := canViewProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -82,8 +82,8 @@ func GetThingModel(c *gin.Context) {
 
 // SaveThingModel 保存产品物模型（整体覆盖）+ 完整 TSL 校验
 func SaveThingModel(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := mustOwnProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -171,8 +171,8 @@ func validIdentifier(id, name, kind string, seen map[string]bool) string {
 
 // ExportThingModel 导出产品物模型为 JSON 文件
 func ExportThingModel(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := canViewProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -195,8 +195,8 @@ func ExportThingModel(c *gin.Context) {
 
 // ImportThingModel 从上传的 JSON 文件导入物模型
 func ImportThingModel(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := mustOwnProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}

@@ -100,6 +100,18 @@ func NewRouter() *gin.Engine {
 			auth.PUT("/groups/:id", UpdateGroup)
 			auth.DELETE("/groups/:id", DeleteGroup)
 
+			// 账号管理 + 产品下放（仅一级主账号）
+			primary := auth.Group("", PrimaryAuth())
+			{
+				primary.GET("/accounts", ListAccounts)
+				primary.POST("/accounts", CreateAccount)
+				primary.PUT("/accounts/:id", UpdateAccount)
+				primary.DELETE("/accounts/:id", DeleteAccount)
+				primary.GET("/products/:id/grants", ListGrants)
+				primary.POST("/products/:id/grants", CreateGrant)
+				primary.DELETE("/products/:id/grants/:sid", DeleteGrant)
+			}
+
 			// 开发者工具
 			sim := auth.Group("/simulator")
 			sim.POST("/connect", ConnectSimulator)

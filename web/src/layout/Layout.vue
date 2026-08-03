@@ -24,6 +24,9 @@
         <el-menu-item index="/apps">
           <el-icon><Key /></el-icon><span>应用管理</span>
         </el-menu-item>
+        <el-menu-item v-if="tier === 'primary'" index="/accounts">
+          <el-icon><UserFilled /></el-icon><span>子账号管理</span>
+        </el-menu-item>
         <el-menu-item index="/ota">
           <el-icon><UploadFilled /></el-icon><span>OTA升级</span>
         </el-menu-item>
@@ -109,7 +112,19 @@ function onMsg(msg: any) {
   }
 }
 
-onMounted(() => realtime.on(onMsg))
+const tier = ref(localStorage.getItem('tier') || 'primary')
+
+onMounted(async () => {
+  realtime.on(onMsg)
+  // 兼容旧会话：tier 缺失则拉 profile 补全
+  if (!localStorage.getItem('tier')) {
+    try {
+      const p = await api.profile()
+      tier.value = p.tier || 'primary'
+      localStorage.setItem('tier', tier.value)
+    } catch { /* ignore */ }
+  }
+})
 onUnmounted(() => realtime.off(onMsg))
 
 // ---- 修改密码 ----
@@ -164,6 +179,7 @@ function onCommand(cmd: string) {
     realtime.close()
     localStorage.removeItem('token')
     localStorage.removeItem('username')
+    localStorage.removeItem('tier')
     router.push('/login')
   }
 }

@@ -27,7 +27,7 @@ func ListTraces(c *gin.Context) {
 		params.Page = 1
 	}
 
-	q := repository.DB.Where("user_id = ?", UID(c))
+	q := repository.DB.Scopes(ownedScope(c, ""))
 	if params.DeviceID > 0 {
 		q = q.Where("device_id = ?", params.DeviceID)
 	}
@@ -63,7 +63,7 @@ func ListTraces(c *gin.Context) {
 func GetTrace(c *gin.Context) {
 	traceID := c.Param("traceId")
 	var trace model.MessageTrace
-	if err := repository.DB.Where("trace_id = ? AND user_id = ?", traceID, UID(c)).First(&trace).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("trace_id = ?", traceID).First(&trace).Error; err != nil {
 		Fail(c, 1, "trace not found")
 		return
 	}

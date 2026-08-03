@@ -186,6 +186,41 @@ export interface OpenApp {
   createdAt: string
 }
 
+export interface Account {
+  id: number
+  username: string
+  nickname: string
+  role: string
+  parentId?: number | null
+  status: string
+  createdAt: string
+  deviceCount?: number
+  grantCount?: number
+}
+
+export interface ProductGrant {
+  id: number
+  productId: number
+  secondaryId: number
+  secondaryName?: string
+  nickname?: string
+  permission: string
+  createdAt: string
+}
+
+// 账号层级：platform(超管) / primary(一级) / secondary(二级)
+export function computeTier(user: any): string {
+  if (user?.role === 'admin') return 'platform'
+  if (user?.parentId == null) return 'primary'
+  return 'secondary'
+}
+export function currentTier(): string {
+  return localStorage.getItem('tier') || 'primary'
+}
+export function isSecondary(): boolean {
+  return currentTier() === 'secondary'
+}
+
 export interface EventReport {
   id: number
   deviceId: number
@@ -223,6 +258,20 @@ export const api = {
     http.post('/auth/register', data) as Promise<{ id: number }>,
   changePassword: (data: { oldPassword: string; newPassword: string }) =>
     http.post('/auth/change-password', data) as Promise<void>,
+  profile: () => http.get('/auth/profile') as Promise<any>,
+
+  listAccounts: () => http.get('/accounts') as Promise<Account[]>,
+  createAccount: (data: { username: string; password: string; nickname?: string }) =>
+    http.post('/accounts', data) as Promise<Account>,
+  updateAccount: (id: number, data: { nickname?: string; password?: string; status?: string }) =>
+    http.put(`/accounts/${id}`, data),
+  deleteAccount: (id: number) => http.delete(`/accounts/${id}`),
+
+  listGrants: (productId: number) => http.get(`/products/${productId}/grants`) as Promise<ProductGrant[]>,
+  createGrant: (productId: number, secondaryId: number) =>
+    http.post(`/products/${productId}/grants`, { secondaryId }),
+  deleteGrant: (productId: number, secondaryId: number) =>
+    http.delete(`/products/${productId}/grants/${secondaryId}`),
   overview: () => http.get('/overview') as Promise<any>,
 
   listProducts: (params?: any) => http.get('/products', { params }) as Promise<Page<Product>>,

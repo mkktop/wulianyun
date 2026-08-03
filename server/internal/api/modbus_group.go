@@ -9,8 +9,8 @@ import (
 
 // ListModbusGroups 查询产品的 Modbus 采集组
 func ListModbusGroups(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := canViewProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -39,8 +39,8 @@ func normalizeGroupReq(r *modbusGroupReq) {
 
 // CreateModbusGroup 创建采集组
 func CreateModbusGroup(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := mustOwnProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -92,10 +92,13 @@ func DeleteModbusGroup(c *gin.Context) {
 	OK(c, nil)
 }
 
-// joinGroupOwner 校验分组归属当前用户（经产品关联）
+// joinGroupOwner 校验分组归属当前用户（经产品关联）。采集组属产品定义，仅 owner/超管可改。
 func joinGroupOwner(c *gin.Context, g *model.ModbusGroup) error {
-	return repository.DB.
+	q := repository.DB.
 		Joins("JOIN products ON products.id = modbus_groups.product_id").
-		Where("modbus_groups.id = ? AND products.user_id = ?", c.Param("gid"), UID(c)).
-		First(g).Error
+		Where("modbus_groups.id = ?", c.Param("gid"))
+	if !IsAdmin(c) {
+		q = q.Where("products.user_id = ?", UID(c))
+	}
+	return q.First(g).Error
 }

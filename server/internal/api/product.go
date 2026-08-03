@@ -36,6 +36,10 @@ type productReq struct {
 }
 
 func CreateProduct(c *gin.Context) {
+	if isSecondary(c) {
+		Fail(c, 403, "二级账号无法创建产品，请使用主账号下放的产品")
+		return
+	}
 	var req productReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, 400, "产品名称必填")
@@ -86,14 +90,14 @@ func CreateProduct(c *gin.Context) {
 
 func ListProducts(c *gin.Context) {
 	var list []model.Product
-	q := repository.DB.Where("user_id = ?", UID(c)).Order("id desc")
+	q := repository.DB.Model(&model.Product{}).Scopes(productScope(c))
 	if kw := c.Query("keyword"); kw != "" {
 		q = q.Where("name ILIKE ?", "%"+kw+"%")
 	}
 	var total int64
-	q.Model(&model.Product{}).Count(&total)
+	q.Count(&total)
 	page, size := pageArgs(c)
-	if err := q.Offset((page - 1) * size).Limit(size).Find(&list).Error; err != nil {
+	if err := q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error; err != nil {
 		Fail(c, 500, "查询失败")
 		return
 	}
@@ -104,8 +108,8 @@ func ListProducts(c *gin.Context) {
 }
 
 func GetProduct(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := canViewProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -114,8 +118,8 @@ func GetProduct(c *gin.Context) {
 }
 
 func UpdateProduct(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := mustOwnProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -146,8 +150,8 @@ func UpdateProduct(c *gin.Context) {
 }
 
 func DeleteProduct(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := mustOwnProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -157,6 +161,7 @@ func DeleteProduct(c *gin.Context) {
 		Fail(c, 400, "产品下还有设备，请先删除设备")
 		return
 	}
+	repository.DB.Where("product_id = ?", p.ID).Delete(&model.ProductGrant{}) // 清理下放授权
 	repository.DB.Delete(&p)
 	OK(c, nil)
 }

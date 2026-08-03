@@ -11,8 +11,8 @@ import (
 
 // ProductStats 产品概况统计
 func ProductStats(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := canViewProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -58,7 +58,7 @@ func ProductStats(c *gin.Context) {
 
 // ListEventReports 事件上报记录（产品或设备维度）
 func ListEventReports(c *gin.Context) {
-	q := repository.DB.Model(&model.EventReport{}).Where("user_id = ?", UID(c))
+	q := repository.DB.Model(&model.EventReport{}).Scopes(ownedScope(c, ""))
 	if pid := c.Query("productId"); pid != "" {
 		q = q.Where("product_id = ?", pid)
 	}
@@ -78,7 +78,7 @@ func ListEventReports(c *gin.Context) {
 
 // ListCommandLogs 指令下发日志（产品或设备维度）
 func ListCommandLogs(c *gin.Context) {
-	q := repository.DB.Model(&model.CommandLog{}).Where("user_id = ?", UID(c))
+	q := repository.DB.Model(&model.CommandLog{}).Scopes(ownedScope(c, ""))
 	if pid := c.Query("productId"); pid != "" {
 		q = q.Where("product_id = ?", pid)
 	}
@@ -114,7 +114,7 @@ func CreateGroup(c *gin.Context) {
 
 func ListGroups(c *gin.Context) {
 	var list []model.DeviceGroup
-	repository.DB.Where("user_id = ?", UID(c)).Order("id asc").Find(&list)
+	repository.DB.Scopes(ownedScope(c, "")).Order("id asc").Find(&list)
 	for i := range list {
 		repository.DB.Model(&model.Device{}).Where("group_id = ?", list[i].ID).Count(&list[i].DeviceCount)
 	}
@@ -123,7 +123,7 @@ func ListGroups(c *gin.Context) {
 
 func UpdateGroup(c *gin.Context) {
 	var g model.DeviceGroup
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&g).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&g).Error; err != nil {
 		Fail(c, 404, "分组不存在")
 		return
 	}
@@ -140,7 +140,7 @@ func UpdateGroup(c *gin.Context) {
 }
 
 func DeleteGroup(c *gin.Context) {
-	res := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).Delete(&model.DeviceGroup{})
+	res := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).Delete(&model.DeviceGroup{})
 	if res.RowsAffected == 0 {
 		Fail(c, 404, "分组不存在")
 		return
@@ -152,8 +152,8 @@ func DeleteGroup(c *gin.Context) {
 
 // BatchCreateDevices 批量创建设备
 func BatchCreateDevices(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := canViewProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -205,8 +205,8 @@ func BatchCreateDevices(c *gin.Context) {
 
 // DeviceAlarmStats 产品下设备告警统计（按设备+分组聚合）
 func DeviceAlarmStats(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := canViewProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}

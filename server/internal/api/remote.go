@@ -6,25 +6,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
 	"iot-platform/internal/service"
 )
 
-// findOwnedProduct 校验产品归属当前用户
-func findOwnedProduct(c *gin.Context) (*model.Product, bool) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
-		Fail(c, 404, "产品不存在")
-		return nil, false
-	}
-	return &p, true
-}
-
 // GetRemoteConfig 获取产品远程配置
 func GetRemoteConfig(c *gin.Context) {
-	p, ok := findOwnedProduct(c)
-	if !ok {
+	p, err := canViewProduct(c, c.Param("id"))
+	if err != nil {
+		Fail(c, 404, "产品不存在")
 		return
 	}
 	cfg := map[string]interface{}{}
@@ -36,8 +26,9 @@ func GetRemoteConfig(c *gin.Context) {
 
 // SaveRemoteConfig 保存产品远程配置（版本号自增）
 func SaveRemoteConfig(c *gin.Context) {
-	p, ok := findOwnedProduct(c)
-	if !ok {
+	p, err := mustOwnProduct(c, c.Param("id"))
+	if err != nil {
+		Fail(c, 404, "产品不存在")
 		return
 	}
 	var req struct {
@@ -57,8 +48,9 @@ func SaveRemoteConfig(c *gin.Context) {
 
 // PushRemoteConfig 主动把远程配置广播给产品下所有设备
 func PushRemoteConfig(c *gin.Context) {
-	p, ok := findOwnedProduct(c)
-	if !ok {
+	p, err := mustOwnProduct(c, c.Param("id"))
+	if err != nil {
+		Fail(c, 404, "产品不存在")
 		return
 	}
 	cfg := map[string]interface{}{}
@@ -80,8 +72,9 @@ func PushRemoteConfig(c *gin.Context) {
 
 // BroadcastProduct 向产品下所有设备广播自定义消息
 func BroadcastProduct(c *gin.Context) {
-	p, ok := findOwnedProduct(c)
-	if !ok {
+	p, err := mustOwnProduct(c, c.Param("id"))
+	if err != nil {
+		Fail(c, 404, "产品不存在")
 		return
 	}
 	var req struct {

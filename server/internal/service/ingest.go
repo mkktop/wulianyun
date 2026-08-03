@@ -180,8 +180,11 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 		string(mergePayload), fmt.Sprintf("%d", now.UnixMilli()),
 	)
 
-	// 实时推送
-	ws.H.PushTelemetry(d.UserID, d.ID, map[string]interface{}{"ts": now.UnixMilli(), "data": data})
+	// 实时推送：设备归属者 + 其一级父账号（一级实时看二级设备曲线）
+	telemetryMsg := map[string]interface{}{"ts": now.UnixMilli(), "data": data}
+	for _, uid := range PushRecipients(d.UserID) {
+		ws.H.PushTelemetry(uid, d.ID, telemetryMsg)
+	}
 
 	// 同步设备影子 reported + 规则引擎评估
 	mergeShadowReported(d, data)
@@ -247,9 +250,12 @@ func HandleDeviceStatus(clientID string, online bool) {
 	}
 	go writeDeviceLog(d.UserID, d.ID, d.Name, logCategory, logSummary, "clientid: "+clientID, "")
 
-	ws.H.PushDeviceStatus(d.UserID, d.ID, map[string]interface{}{
+	statusMsg := map[string]interface{}{
 		"deviceId": d.ID, "name": d.Name, "status": status, "ts": now.UnixMilli(),
-	})
+	}
+	for _, uid := range PushRecipients(d.UserID) {
+		ws.H.PushDeviceStatus(uid, d.ID, statusMsg)
+	}
 }
 
 // GetLatest 读取设备最新遥测（Redis 缓存优先，回退数据库）

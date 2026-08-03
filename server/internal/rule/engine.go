@@ -32,6 +32,29 @@ func UseRedisSilence(rdb *redis.Client) {
 	redisSilenceRDB = rdb
 }
 
+// RecipientResolver 由 main 注入：把一个用户展开为"应接收其实时数据/告警"的用户集合
+// （含其一级父账号，便于一级实时看二级设备的告警）。nil 时只推该用户本身。
+var RecipientResolver func(uint) []uint
+
+// pushAlarmTo 把告警推送给 userIDs 及其父账号（去重）。
+func pushAlarmTo(userIDs []uint, payload map[string]interface{}) {
+	if RecipientResolver == nil {
+		for _, uid := range userIDs {
+			ws.H.PushAlarm(uid, payload)
+		}
+		return
+	}
+	seen := make(map[uint]bool, len(userIDs)*2)
+	for _, uid := range userIDs {
+		for _, r := range RecipientResolver(uid) {
+			if !seen[r] {
+				seen[r] = true
+				ws.H.PushAlarm(r, payload)
+			}
+		}
+	}
+}
+
 // ruleCache 规则缓存：按 userID 分组，TTL 30s
 var (
 	ruleCacheMu   sync.RWMutex
@@ -221,8 +244,8 @@ func autoResolveAlarm(r *model.Rule, d *model.Device) {
 			}, r.RetryCount)
 		}
 	}
-	// WebSocket 推送
-	ws.H.PushAlarm(r.UserID, map[string]interface{}{
+	// WebSocket 推送（fan-out 给规则归属者及其一级父账号）
+	pushAlarmTo([]uint{r.UserID}, map[string]interface{}{
 		"type":     "alarm_resolve",
 		"ruleName": r.Name,
 		"device":   d.Name,
@@ -295,8 +318,8 @@ func fireAlarm(r *model.Rule, d *model.Device, act alarmAction, msg string, data
 	}
 	markFired(r, d.ID)
 
-	// 站内实时通知（默认始终推送）
-	ws.H.PushAlarm(r.UserID, map[string]interface{}{
+	// 站内实时通知（默认始终推送）—— fan-out 给规则归属者及其一级父账号
+	pushAlarmTo([]uint{r.UserID}, map[string]interface{}{
 		"id": alarm.ID, "ruleName": r.Name, "deviceId": d.ID, "deviceName": d.Name,
 		"level": act.Level, "message": msg, "ts": alarm.CreatedAt.UnixMilli(),
 	})

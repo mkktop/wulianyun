@@ -13,8 +13,8 @@ import (
 
 // GetModbusPoints 查询产品 Modbus 点位表
 func GetModbusPoints(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := canViewProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -42,8 +42,8 @@ type modbusPointReq struct {
 
 // SaveModbusPoints 覆盖保存产品点位表
 func SaveModbusPoints(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := mustOwnProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -96,8 +96,8 @@ func SaveModbusPoints(c *gin.Context) {
 
 // TestModbusPoint 用示例应答帧(hex)验证点位解析
 func TestModbusPoint(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	_, err := canViewProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}

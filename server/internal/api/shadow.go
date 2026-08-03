@@ -15,7 +15,7 @@ import (
 // GetDeviceShadow 查询设备影子
 func GetDeviceShadow(c *gin.Context) {
 	var d model.Device
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&d).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&d).Error; err != nil {
 		Fail(c, 404, "设备不存在")
 		return
 	}
@@ -26,7 +26,7 @@ func GetDeviceShadow(c *gin.Context) {
 // 支持 expireSec 参数：指定秒数后指令自动过期
 func SetDeviceProperty(c *gin.Context) {
 	var d model.Device
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&d).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&d).Error; err != nil {
 		Fail(c, 404, "设备不存在")
 		return
 	}
@@ -79,7 +79,7 @@ func SetDeviceProperty(c *gin.Context) {
 // InvokeService 服务调用：按物模型服务标识符下发
 func InvokeService(c *gin.Context) {
 	var d model.Device
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&d).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&d).Error; err != nil {
 		Fail(c, 404, "设备不存在")
 		return
 	}

@@ -20,6 +20,7 @@ const router = createRouter({
         { path: 'rules', component: () => import('../views/Rules.vue'), meta: { title: '规则引擎' } },
         { path: 'alarms', component: () => import('../views/Alarms.vue'), meta: { title: '告警中心' } },
         { path: 'apps', component: () => import('../views/Apps.vue'), meta: { title: '应用管理' } },
+        { path: 'accounts', component: () => import('../views/Accounts.vue'), meta: { title: '子账号管理' } },
         { path: 'ota', component: () => import('../views/OTA.vue'), meta: { title: 'OTA升级' } },
         { path: 'tools/simulator', component: () => import('../views/DeviceSimulator.vue'), meta: { title: '设备模拟器' } },
         { path: 'tools/mqtt-debug', component: () => import('../views/MqttDebug.vue'), meta: { title: 'MQTT调试台' } },

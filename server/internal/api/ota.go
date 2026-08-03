@@ -22,7 +22,7 @@ import (
 )
 
 func ListFirmwares(c *gin.Context) {
-	q := repository.DB.Where("user_id = ?", UID(c))
+	q := repository.DB.Scopes(ownedScope(c, ""))
 	if pid := c.Query("productId"); pid != "" {
 		q = q.Where("product_id = ?", pid)
 	}
@@ -65,9 +65,8 @@ func CreateFirmware(c *gin.Context) {
 	}
 	description := c.PostForm("description")
 
-	// 校验产品归属
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", productID, UID(c)).First(&p).Error; err != nil {
+	// 校验产品归属（owner 或被下放）
+	if _, e := canViewProduct(c, productID); e != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -131,7 +130,7 @@ func CreateFirmware(c *gin.Context) {
 // DeleteFirmware 删除固件（同时删除物理文件）
 func DeleteFirmware(c *gin.Context) {
 	var fw model.Firmware
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&fw).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&fw).Error; err != nil {
 		Fail(c, 404, "固件不存在")
 		return
 	}
@@ -163,14 +162,14 @@ func CreateOTATask(c *gin.Context) {
 		return
 	}
 	var fw model.Firmware
-	if err := repository.DB.Where("id = ? AND user_id = ?", req.FirmwareID, UID(c)).First(&fw).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", req.FirmwareID).First(&fw).Error; err != nil {
 		Fail(c, 404, "固件不存在")
 		return
 	}
 
 	// 校验设备归属并查询设备信息
 	var devices []model.Device
-	repository.DB.Where("user_id = ? AND id IN ?", UID(c), req.DeviceIDs).Find(&devices)
+	repository.DB.Scopes(ownedScope(c, "")).Where("id IN ?", req.DeviceIDs).Find(&devices)
 	if len(devices) == 0 {
 		Fail(c, 400, "未找到有效设备")
 		return
@@ -222,7 +221,7 @@ func CreateOTATask(c *gin.Context) {
 // ListOTATasks 列出升级任务（关联固件版本信息）
 func ListOTATasks(c *gin.Context) {
 	var tasks []model.OTATask
-	repository.DB.Where("user_id = ?", UID(c)).Order("id desc").Find(&tasks)
+	repository.DB.Scopes(ownedScope(c, "")).Order("id desc").Find(&tasks)
 
 	// 关联固件信息
 	firmwareMap := make(map[uint]model.Firmware)

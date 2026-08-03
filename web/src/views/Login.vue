@@ -39,7 +39,7 @@
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { api } from '../api'
+import { api, computeTier } from '../api'
 
 const router = useRouter()
 const isRegister = ref(false)
@@ -61,6 +61,7 @@ async function submit() {
       const { token, user } = await api.login(form)
       localStorage.setItem('token', token)
       localStorage.setItem('username', user.nickname || user.username)
+      localStorage.setItem('tier', computeTier(user))
       router.push('/')
     }
   } finally {

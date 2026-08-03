@@ -14,13 +14,31 @@ const (
 	DeviceStatusDisabled = "disabled"
 )
 
+// 账号状态
+const (
+	AccountStatusActive   = "active"
+	AccountStatusDisabled = "disabled"
+)
+
 type User struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
 	Username     string    `gorm:"size:64;uniqueIndex;not null" json:"username"`
 	PasswordHash string    `gorm:"size:128;not null" json:"-"`
 	Nickname     string    `gorm:"size:64" json:"nickname"`
-	Role         string    `gorm:"size:16;default:user" json:"role"` // admin / user
+	Role         string    `gorm:"size:16;default:user" json:"role"` // admin=平台超管 / user=普通账号
+	ParentID     *uint     `gorm:"index" json:"parentId,omitempty"`  // 父账号 ID；nil=一级（独立主账号）；非空=二级
+	Status       string    `gorm:"size:16;default:active" json:"status"` // active / disabled
 	CreatedAt    time.Time `json:"createdAt"`
+}
+
+// ProductGrant 产品下放授权：一级把某个产品下放给某个二级账号使用。
+type ProductGrant struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	ProductID   uint      `gorm:"uniqueIndex:idx_product_grant;not null" json:"productId"`
+	SecondaryID uint      `gorm:"uniqueIndex:idx_product_grant;not null" json:"secondaryId"` // 接收的二级账号
+	GrantedBy   uint      `gorm:"index" json:"grantedBy"` // 下放操作人（一级）
+	Permission  string    `gorm:"size:16;default:operate" json:"permission"`                 // 默认 operate；后续可细化
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 // 产品接入数据模式

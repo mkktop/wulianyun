@@ -7,14 +7,13 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"iot-platform/internal/codec"
-	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
 )
 
 // GetCodec 查询产品解析脚本
 func GetCodec(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := canViewProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -23,8 +22,8 @@ func GetCodec(c *gin.Context) {
 
 // SaveCodec 保存产品解析脚本（空脚本表示关闭脚本解析）
 func SaveCodec(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := mustOwnProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
@@ -40,14 +39,14 @@ func SaveCodec(c *gin.Context) {
 		Fail(c, 400, "脚本必须包含 decode 函数")
 		return
 	}
-	repository.DB.Model(&p).Update("codec_script", req.Script)
+	repository.DB.Model(p).Update("codec_script", req.Script)
 	OK(c, nil)
 }
 
 // TestCodec 用十六进制报文测试解析脚本
 func TestCodec(c *gin.Context) {
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&p).Error; err != nil {
+	p, err := canViewProduct(c, c.Param("id"))
+	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}

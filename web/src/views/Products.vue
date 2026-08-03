@@ -4,7 +4,7 @@
       <el-input v-model="keyword" placeholder="搜索产品名称" clearable style="width: 240px" @change="load">
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
-      <el-button type="primary" @click="$router.push('/products/new')">
+      <el-button v-if="!secondary" type="primary" @click="$router.push('/products/new')">
         <el-icon><Plus /></el-icon>&nbsp;创建产品
       </el-button>
     </div>
@@ -60,8 +60,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { api, type Product } from '../api'
+import { api, type Product, isSecondary } from '../api'
 
+const secondary = isSecondary()
 const list = ref<Product[]>([])
 const total = ref(0)
 const page = ref(1)

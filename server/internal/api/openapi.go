@@ -37,13 +37,13 @@ func CreateOpenApp(c *gin.Context) {
 
 func ListOpenApps(c *gin.Context) {
 	var list []model.OpenApp
-	repository.DB.Where("user_id = ?", UID(c)).Order("id desc").Find(&list)
+	repository.DB.Scopes(ownedScope(c, "")).Order("id desc").Find(&list)
 	OK(c, list)
 }
 
 func UpdateOpenApp(c *gin.Context) {
 	var app model.OpenApp
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&app).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&app).Error; err != nil {
 		Fail(c, 404, "应用不存在")
 		return
 	}
@@ -67,7 +67,7 @@ func UpdateOpenApp(c *gin.Context) {
 }
 
 func DeleteOpenApp(c *gin.Context) {
-	res := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).Delete(&model.OpenApp{})
+	res := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).Delete(&model.OpenApp{})
 	if res.RowsAffected == 0 {
 		Fail(c, 404, "应用不存在")
 		return

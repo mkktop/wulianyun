@@ -60,7 +60,11 @@ func Login(c *gin.Context) {
 		Fail(c, 500, "登录失败")
 		return
 	}
-	token, err := GenToken(user.ID, user.Username, user.Role)
+	if user.Status == model.AccountStatusDisabled {
+		Fail(c, 400, "账号已禁用")
+		return
+	}
+	token, err := GenToken(user.ID, user.Username, user.Role, user.ParentID)
 	if err != nil {
 		Fail(c, 500, "生成令牌失败")
 		return
@@ -74,7 +78,15 @@ func Profile(c *gin.Context) {
 		Fail(c, 404, "用户不存在")
 		return
 	}
-	OK(c, user)
+	OK(c, gin.H{
+		"id":       user.ID,
+		"username": user.Username,
+		"nickname": user.Nickname,
+		"role":     user.Role,
+		"parentId": user.ParentID,
+		"tier":     Tier(c),
+		"status":   user.Status,
+	})
 }
 
 // ChangePassword 修改当前用户登录密码

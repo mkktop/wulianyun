@@ -34,9 +34,9 @@ func CreateDevice(c *gin.Context) {
 		Fail(c, 400, "产品和设备名称必填")
 		return
 	}
-	var p model.Product
-	if err := repository.DB.Where("id = ? AND user_id = ?", req.ProductID, UID(c)).First(&p).Error; err != nil {
-		Fail(c, 404, "产品不存在")
+	p, err := canViewProduct(c, req.ProductID)
+	if err != nil {
+		Fail(c, 404, "产品不存在或未下放")
 		return
 	}
 	var cnt int64
@@ -63,7 +63,7 @@ func CreateDevice(c *gin.Context) {
 }
 
 func ListDevices(c *gin.Context) {
-	q := repository.DB.Model(&model.Device{}).Where("devices.user_id = ?", UID(c))
+	q := repository.DB.Model(&model.Device{}).Scopes(ownedScope(c, "devices.user_id"))
 	if pid := c.Query("productId"); pid != "" {
 		q = q.Where("product_id = ?", pid)
 	}
@@ -114,7 +114,7 @@ func ListDevices(c *gin.Context) {
 
 func GetDevice(c *gin.Context) {
 	var d model.Device
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&d).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&d).Error; err != nil {
 		Fail(c, 404, "设备不存在")
 		return
 	}
@@ -127,7 +127,7 @@ func GetDevice(c *gin.Context) {
 
 func UpdateDevice(c *gin.Context) {
 	var d model.Device
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&d).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&d).Error; err != nil {
 		Fail(c, 404, "设备不存在")
 		return
 	}
@@ -171,7 +171,7 @@ func UpdateDevice(c *gin.Context) {
 
 func DeleteDevice(c *gin.Context) {
 	var d model.Device
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&d).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&d).Error; err != nil {
 		Fail(c, 404, "设备不存在")
 		return
 	}
@@ -184,7 +184,7 @@ func DeleteDevice(c *gin.Context) {
 // ListDeviceEvents 设备上下线事件日志
 func ListDeviceEvents(c *gin.Context) {
 	var d model.Device
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&d).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&d).Error; err != nil {
 		Fail(c, 404, "设备不存在")
 		return
 	}
@@ -197,7 +197,7 @@ func ListDeviceEvents(c *gin.Context) {
 func ListSubDevices(c *gin.Context) {
 	gatewayID := c.Param("id")
 	var list []model.Device
-	repository.DB.Where("gateway_id = ? AND user_id = ?", gatewayID, UID(c)).Find(&list)
+	repository.DB.Scopes(ownedScope(c, "")).Where("gateway_id = ?", gatewayID).Find(&list)
 	OK(c, list)
 }
 
@@ -212,11 +212,11 @@ func AddSubDevice(c *gin.Context) {
 		return
 	}
 	var gw model.Device
-	if err := repository.DB.Where("id = ? AND user_id = ?", gatewayID, UID(c)).First(&gw).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", gatewayID).First(&gw).Error; err != nil {
 		Fail(c, 404, "网关设备不存在")
 		return
 	}
-	repository.DB.Model(&model.Device{}).Where("id = ? AND user_id = ?", req.DeviceID, UID(c)).Update("gateway_id", gw.ID)
+	repository.DB.Model(&model.Device{}).Scopes(ownedScope(c, "")).Where("id = ?", req.DeviceID).Update("gateway_id", gw.ID)
 	OK(c, nil)
 }
 
@@ -224,6 +224,6 @@ func AddSubDevice(c *gin.Context) {
 func RemoveSubDevice(c *gin.Context) {
 	gatewayID := c.Param("id")
 	subID := c.Param("subId")
-	repository.DB.Model(&model.Device{}).Where("id = ? AND gateway_id = ? AND user_id = ?", subID, gatewayID, UID(c)).Update("gateway_id", nil)
+	repository.DB.Model(&model.Device{}).Scopes(ownedScope(c, "")).Where("id = ? AND gateway_id = ?", subID, gatewayID).Update("gateway_id", nil)
 	OK(c, nil)
 }

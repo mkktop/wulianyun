@@ -16,7 +16,7 @@ import (
 // DeviceLatest 设备最新遥测
 func DeviceLatest(c *gin.Context) {
 	var d model.Device
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&d).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&d).Error; err != nil {
 		Fail(c, 404, "设备不存在")
 		return
 	}
@@ -26,7 +26,7 @@ func DeviceLatest(c *gin.Context) {
 // DeviceHistory 历史遥测查询 ?start=毫秒&end=毫秒&limit=n
 func DeviceHistory(c *gin.Context) {
 	var d model.Device
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&d).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&d).Error; err != nil {
 		Fail(c, 404, "设备不存在")
 		return
 	}
@@ -72,7 +72,7 @@ func DeviceHistory(c *gin.Context) {
 // SendCommand 向设备下发消息（透传 JSON）
 func SendCommand(c *gin.Context) {
 	var d model.Device
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&d).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&d).Error; err != nil {
 		Fail(c, 404, "设备不存在")
 		return
 	}
@@ -94,11 +94,12 @@ func SendCommand(c *gin.Context) {
 
 // Overview 平台概览统计
 func Overview(c *gin.Context) {
-	uid := UID(c)
-	var productCount, deviceCount, onlineCount int64
-	repository.DB.Model(&model.Product{}).Where("user_id = ?", uid).Count(&productCount)
-	repository.DB.Model(&model.Device{}).Where("user_id = ?", uid).Count(&deviceCount)
-	repository.DB.Model(&model.Device{}).Where("user_id = ? AND status = ?", uid, model.DeviceStatusOnline).Count(&onlineCount)
+	var productCount int64
+	repository.DB.Model(&model.Product{}).Scopes(productScope(c)).Count(&productCount)
+
+	var deviceCount, onlineCount int64
+	repository.DB.Model(&model.Device{}).Scopes(ownedScope(c, "")).Count(&deviceCount)
+	repository.DB.Model(&model.Device{}).Scopes(ownedScope(c, "")).Where("status = ?", model.DeviceStatusOnline).Count(&onlineCount)
 
 	// 设备状态分布（大屏用）
 	type statusCount struct {
@@ -107,15 +108,15 @@ func Overview(c *gin.Context) {
 	}
 	var statusDist []statusCount
 	repository.DB.Model(&model.Device{}).Select("status, count(*) as count").
-		Where("user_id = ?", uid).Group("status").Scan(&statusDist)
+		Scopes(ownedScope(c, "")).Group("status").Scan(&statusDist)
 
 	// 今日消息量
 	today := time.Now().Truncate(24 * time.Hour)
 	var msgToday int64
 	repository.DB.Model(&model.Telemetry{}).
 		Joins("JOIN devices ON devices.id = telemetries.device_id").
-		Where("devices.user_id = ? AND telemetries.ts >= ?", uid, today).
-		Count(&msgToday)
+		Scopes(ownedScope(c, "devices.user_id")).
+		Where("telemetries.ts >= ?", today).Count(&msgToday)
 
 	// 近7日每日消息量
 	type dayCount struct {
@@ -123,11 +124,12 @@ func Overview(c *gin.Context) {
 		Count int64  `json:"count"`
 	}
 	var trend []dayCount
-	repository.DB.Raw(`
-		SELECT to_char(date_trunc('day', t.ts), 'MM-DD') AS day, count(*) AS count
-		FROM telemetries t JOIN devices d ON d.id = t.device_id
-		WHERE d.user_id = ? AND t.ts >= ?
-		GROUP BY 1 ORDER BY 1`, uid, today.AddDate(0, 0, -6)).Scan(&trend)
+	repository.DB.Model(&model.Telemetry{}).
+		Joins("JOIN devices ON devices.id = telemetries.device_id").
+		Scopes(ownedScope(c, "devices.user_id")).
+		Where("telemetries.ts >= ?", today.AddDate(0, 0, -6)).
+		Select("to_char(date_trunc('day', telemetries.ts), 'MM-DD') AS day, count(*) AS count").
+		Group("1").Order("1").Scan(&trend)
 
 	// 设备在线率
 	onlineRate := 0.0
@@ -140,16 +142,15 @@ func Overview(c *gin.Context) {
 	var msgLastHour int64
 	repository.DB.Model(&model.Telemetry{}).
 		Joins("JOIN devices ON devices.id = telemetries.device_id").
-		Where("devices.user_id = ? AND telemetries.ts >= ?", uid, oneHourAgo).
-		Count(&msgLastHour)
+		Scopes(ownedScope(c, "devices.user_id")).
+		Where("telemetries.ts >= ?", oneHourAgo).Count(&msgLastHour)
 	msgRateMin := msgLastHour / 60 // 每分钟平均
 
 	// 总消息量
 	var msgTotal int64
 	repository.DB.Model(&model.Telemetry{}).
 		Joins("JOIN devices ON devices.id = telemetries.device_id").
-		Where("devices.user_id = ?", uid).
-		Count(&msgTotal)
+		Scopes(ownedScope(c, "devices.user_id")).Count(&msgTotal)
 
 	OK(c, gin.H{
 		"productCount": productCount,

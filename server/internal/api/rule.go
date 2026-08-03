@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 
 	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
@@ -49,7 +50,7 @@ func CreateRule(c *gin.Context) {
 }
 
 func ListRules(c *gin.Context) {
-	q := repository.DB.Model(&model.Rule{}).Where("user_id = ?", UID(c))
+	q := repository.DB.Model(&model.Rule{}).Scopes(ownedScope(c, ""))
 	if t := c.Query("type"); t != "" {
 		q = q.Where("type = ?", t)
 	}
@@ -78,7 +79,7 @@ func ListRules(c *gin.Context) {
 
 func UpdateRule(c *gin.Context) {
 	var r model.Rule
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&r).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&r).Error; err != nil {
 		Fail(c, 404, "规则不存在")
 		return
 	}
@@ -104,7 +105,7 @@ func UpdateRule(c *gin.Context) {
 }
 
 func DeleteRule(c *gin.Context) {
-	res := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).Delete(&model.Rule{})
+	res := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).Delete(&model.Rule{})
 	if res.RowsAffected == 0 {
 		Fail(c, 404, "规则不存在")
 		return
@@ -115,7 +116,7 @@ func DeleteRule(c *gin.Context) {
 
 // ListAlarms 告警记录列表
 func ListAlarms(c *gin.Context) {
-	q := repository.DB.Model(&model.Alarm{}).Where("user_id = ?", UID(c))
+	q := repository.DB.Model(&model.Alarm{}).Scopes(ownedScope(c, ""))
 	if st := c.Query("status"); st != "" {
 		q = q.Where("status = ?", st)
 	}
@@ -133,7 +134,7 @@ func ListAlarms(c *gin.Context) {
 // ResolveAlarm 处理告警（标记已解决）
 func ResolveAlarm(c *gin.Context) {
 	var a model.Alarm
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&a).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&a).Error; err != nil {
 		Fail(c, 404, "告警不存在")
 		return
 	}
@@ -147,7 +148,7 @@ func ResolveAlarm(c *gin.Context) {
 // ConfirmAlarm 确认告警（标记已确认，不改状态）
 func ConfirmAlarm(c *gin.Context) {
 	var a model.Alarm
-	if err := repository.DB.Where("id = ? AND user_id = ?", c.Param("id"), UID(c)).First(&a).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&a).Error; err != nil {
 		Fail(c, 404, "告警不存在")
 		return
 	}
@@ -158,30 +159,34 @@ func ConfirmAlarm(c *gin.Context) {
 
 // AlarmStats 告警统计（概览用）
 func AlarmStats(c *gin.Context) {
-	uid := UID(c)
+	ids := visibleOwnerIDs(c)
+	alarmQ := func() *gorm.DB {
+		db := repository.DB.Model(&model.Alarm{})
+		if ids != nil {
+			db = db.Where("user_id IN ?", ids)
+		}
+		return db
+	}
 	var firing, resolved, total, todayCount int64
-	repository.DB.Model(&model.Alarm{}).Where("user_id = ? AND status = ?", uid, model.AlarmStatusFiring).Count(&firing)
-	repository.DB.Model(&model.Alarm{}).Where("user_id = ? AND status = ?", uid, model.AlarmStatusResolved).Count(&resolved)
-	repository.DB.Model(&model.Alarm{}).Where("user_id = ?", uid).Count(&total)
+	alarmQ().Where("status = ?", model.AlarmStatusFiring).Count(&firing)
+	alarmQ().Where("status = ?", model.AlarmStatusResolved).Count(&resolved)
+	alarmQ().Count(&total)
 	today := time.Now().Truncate(24 * time.Hour)
-	repository.DB.Model(&model.Alarm{}).Where("user_id = ? AND created_at >= ?", uid, today).Count(&todayCount)
+	alarmQ().Where("created_at >= ?", today).Count(&todayCount)
 	OK(c, gin.H{"total": total, "firing": firing, "resolved": resolved, "today": todayCount})
 }
 
 // AlarmTrend 近7日告警趋势
 func AlarmTrend(c *gin.Context) {
-	uid := UID(c)
 	type dayCount struct {
 		Day   string `json:"day"`
 		Count int64  `json:"count"`
 	}
 	var trend []dayCount
 	today := time.Now().Truncate(24 * time.Hour)
-	repository.DB.Raw(`
-		SELECT to_char(date_trunc('day', created_at), 'MM-DD') AS day, count(*) AS count
-		FROM alarms
-		WHERE user_id = ? AND created_at >= ?
-		GROUP BY 1 ORDER BY 1
-	`, uid, today.AddDate(0, 0, -6)).Scan(&trend)
+	repository.DB.Model(&model.Alarm{}).Scopes(ownedScope(c, "")).
+		Select("to_char(date_trunc('day', created_at), 'MM-DD') AS day, count(*) AS count").
+		Where("created_at >= ?", today.AddDate(0, 0, -6)).
+		Group("1").Order("1").Scan(&trend)
 	OK(c, trend)
 }

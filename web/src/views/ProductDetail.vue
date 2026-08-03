@@ -186,6 +186,34 @@
         </el-card>
       </el-tab-pane>
 
+      <!-- 产品下放（仅一级） -->
+      <el-tab-pane v-if="isPrimary" label="下放管理" name="grants">
+        <el-card shadow="never">
+          <el-alert type="info" :closable="false" style="margin-bottom: 12px">
+            将该产品下放给名下二级账号，二级即可用此产品类型注册和管理自己的设备（产品定义对二级只读）
+          </el-alert>
+          <div class="toolbar">
+            <span>已下放给 {{ grants.length }} 个二级账号</span>
+            <el-button type="primary" @click="openGrant">下放给子账号</el-button>
+          </div>
+          <el-table :data="grants" size="small" v-loading="grantLoading">
+            <el-table-column prop="secondaryName" label="子账号" min-width="140" />
+            <el-table-column prop="nickname" label="昵称" min-width="120" />
+            <el-table-column prop="permission" label="权限" width="100" />
+            <el-table-column label="下放时间" width="170">
+              <template #default="{ row }">{{ fmt(row.createdAt) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="100">
+              <template #default="{ row }">
+                <el-popconfirm title="确定撤销下放？" @confirm="revokeGrant(row)">
+                  <template #reference><el-button link type="danger" size="small">撤销</el-button></template>
+                </el-popconfirm>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-tab-pane>
+
       <!-- 指令下发日志 -->
       <el-tab-pane label="指令下发日志" name="cmdlogs">
         <el-card shadow="never">
@@ -236,6 +264,22 @@
         <el-button type="primary" :loading="broadcasting" @click="doBroadcast">广播</el-button>
       </template>
     </el-dialog>
+
+    <!-- 下放产品 -->
+    <el-dialog v-model="grantVisible" title="下放产品给子账号" width="420px">
+      <el-form label-width="80px">
+        <el-form-item label="子账号">
+          <el-select v-model="grantSecondaryId" placeholder="选择名下二级账号" style="width: 100%">
+            <el-option v-for="a in accounts" :key="a.id"
+              :label="a.nickname ? `${a.nickname}（${a.username}）` : a.username" :value="a.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="grantVisible = false">取消</el-button>
+        <el-button type="primary" :loading="granting" @click="doGrant">下放</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -246,7 +290,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import {
   api, type Product, type Device, type EventReport, type CommandLog,
-  type ModbusPoint, type TslProperty, type TslEvent, type TslService
+  type ModbusPoint, type TslProperty, type TslEvent, type TslService,
+  currentTier, type Account, type ProductGrant
 } from '../api'
 import ThingModelEditor from '../components/ThingModelEditor.vue'
 import ModbusPointEditor from '../components/ModbusPointEditor.vue'
@@ -302,6 +347,15 @@ const cfgPushing = ref(false)
 const broadcastVisible = ref(false)
 const broadcastText = ref('')
 const broadcasting = ref(false)
+
+// 产品下放（仅一级）
+const isPrimary = currentTier() === 'primary'
+const grants = ref<ProductGrant[]>([])
+const grantLoading = ref(false)
+const grantVisible = ref(false)
+const granting = ref(false)
+const grantSecondaryId = ref<number | undefined>(undefined)
+const accounts = ref<Account[]>([])
 
 const defLabel = computed(() => {
   if (!product.value) return '功能定义'
@@ -492,6 +546,42 @@ function onTabChange(name: string | number) {
   else if (name === 'cmdlogs') loadCmdLogs()
   else if (name === 'config') loadCfg()
   else if (name === 'overview') loadStats()
+  else if (name === 'grants') loadGrants()
+}
+
+// ---- 产品下放 ----
+async function loadGrants() {
+  grantLoading.value = true
+  try {
+    grants.value = await api.listGrants(id)
+  } finally {
+    grantLoading.value = false
+  }
+}
+async function openGrant() {
+  grantSecondaryId.value = undefined
+  accounts.value = await api.listAccounts()
+  grantVisible.value = true
+}
+async function doGrant() {
+  if (!grantSecondaryId.value) {
+    ElMessage.warning('请选择子账号')
+    return
+  }
+  granting.value = true
+  try {
+    await api.createGrant(id, grantSecondaryId.value)
+    ElMessage.success('已下放')
+    grantVisible.value = false
+    loadGrants()
+  } finally {
+    granting.value = false
+  }
+}
+async function revokeGrant(row: ProductGrant) {
+  await api.deleteGrant(id, row.secondaryId)
+  ElMessage.success('已撤销下放')
+  loadGrants()
 }
 
 // ---- 远程配置 / 广播 ----

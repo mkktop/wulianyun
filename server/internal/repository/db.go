@@ -47,6 +47,7 @@ func Init() error {
 		&model.ModbusGroup{}, &model.CommandRequest{},
 		&model.MessageTrace{}, &model.DeviceLog{},
 		&model.Firmware{}, &model.OTATask{},
+		&model.ProductGrant{},
 	); err != nil {
 		return err
 	}

@@ -22,7 +22,7 @@ func ListDeviceLogs(c *gin.Context) {
 		params.Page = 1
 	}
 
-	q := repository.DB.Where("device_id = ?", deviceID)
+	q := repository.DB.Scopes(ownedScope(c, "")).Where("device_id = ?", deviceID)
 	if params.Category != "" {
 		q = q.Where("category = ?", params.Category)
 	}
@@ -51,7 +51,7 @@ func ListAllDeviceLogs(c *gin.Context) {
 		params.Page = 1
 	}
 
-	q := repository.DB.Where("user_id = ?", UID(c))
+	q := repository.DB.Scopes(ownedScope(c, ""))
 	if params.DeviceID > 0 {
 		q = q.Where("device_id = ?", params.DeviceID)
 	}

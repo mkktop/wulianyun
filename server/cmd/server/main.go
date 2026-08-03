@@ -51,6 +51,9 @@ func main() {
 	// 多实例：规则静默缓存迁移到 Redis
 	rule.UseRedisSilence(repository.RDB)
 
+	// 一级账号实时接收二级账号设备的告警（fan-out 注入）
+	rule.RecipientResolver = service.PushRecipients
+
 	// 多实例：TCP 下行通道跨实例路由
 	service.InitDownRouter(repository.RDB)
 
