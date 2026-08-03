@@ -77,6 +77,38 @@ func Profile(c *gin.Context) {
 	OK(c, user)
 }
 
+// ChangePassword 修改当前用户登录密码
+// POST /api/v1/auth/change-password  Body: {"oldPassword":"...","newPassword":"..."}
+func ChangePassword(c *gin.Context) {
+	var req struct {
+		OldPassword string `json:"oldPassword" binding:"required"`
+		NewPassword string `json:"newPassword" binding:"required,min=6,max=64"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, 400, "原密码必填，新密码至少6位")
+		return
+	}
+	var user model.User
+	if err := repository.DB.First(&user, UID(c)).Error; err != nil {
+		Fail(c, 404, "用户不存在")
+		return
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.OldPassword)) != nil {
+		Fail(c, 400, "原密码错误")
+		return
+	}
+	if req.NewPassword == req.OldPassword {
+		Fail(c, 400, "新密码不能与原密码相同")
+		return
+	}
+	hash, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err := repository.DB.Model(&user).Update("password_hash", string(hash)).Error; err != nil {
+		Fail(c, 500, "修改失败")
+		return
+	}
+	OK(c, nil)
+}
+
 // EnsureAdmin 初始化默认管理员；首次无 admin 用户时生效一次。
 // 密码取 config.C.AdminPassword，为空则回退默认 admin123。
 func EnsureAdmin() {

@@ -221,6 +221,8 @@ export const api = {
     http.post('/auth/login', data) as Promise<{ token: string; user: any }>,
   register: (data: { username: string; password: string; nickname?: string }) =>
     http.post('/auth/register', data) as Promise<{ id: number }>,
+  changePassword: (data: { oldPassword: string; newPassword: string }) =>
+    http.post('/auth/change-password', data) as Promise<void>,
   overview: () => http.get('/overview') as Promise<any>,
 
   listProducts: (params?: any) => http.get('/products', { params }) as Promise<Page<Product>>,

@@ -32,6 +32,7 @@ func NewRouter() *gin.Engine {
 		auth := v1.Group("", JWTAuth())
 		{
 			auth.GET("/auth/profile", Profile)
+			auth.POST("/auth/change-password", ChangePassword)
 			auth.GET("/overview", Overview)
 			auth.GET("/ws", WSHandler)
 
