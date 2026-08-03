@@ -37,6 +37,10 @@
           <el-menu-item index="/tools/traces">消息轨迹</el-menu-item>
         </el-sub-menu>
       </el-menu>
+      <a class="docs-link" href="/developer/" target="_blank" rel="noopener">
+        <el-icon><Document /></el-icon><span>开发文档</span>
+        <el-icon class="external"><Right /></el-icon>
+      </a>
     </el-aside>
     <el-container>
       <el-header class="header">
@@ -106,6 +110,14 @@ function onCommand(cmd: string) {
   color: #fff; font-size: 18px; font-weight: 600;
 }
 .aside :deep(.el-menu) { border-right: none; }
+.docs-link {
+  display: flex; align-items: center; gap: 6px;
+  margin: 8px 12px; padding: 0 20px; height: 40px;
+  color: #a6adb4; font-size: 14px; text-decoration: none;
+  border-radius: 4px; transition: background .2s, color .2s;
+}
+.docs-link:hover { background: #1f3a5f; color: #fff; }
+.docs-link .external { margin-left: auto; font-size: 12px; opacity: .6; }
 .header {
   display: flex; align-items: center; justify-content: space-between;
   background: #fff; border-bottom: 1px solid #e8e8e8;

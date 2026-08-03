@@ -1,0 +1,178 @@
+# 示例代码
+
+> 一站式最小可运行示例。所有示例假定已取得设备三元组（`ProductKey / DeviceName / DeviceSecret`），平台地址为 `http://<平台地址>`。
+
+## 一、MQTT 上报 + 接收下行（Node.js）
+
+```js
+const mqtt = require('mqtt')
+
+const productKey = 'pk...'
+const deviceName = 'dev1'
+const secret = '...'
+
+const client = mqtt.connect('mqtt://<平台地址>:1883', {
+  clientId: `${productKey}.${deviceName}`,
+  username: deviceName,
+  password: secret,
+  reconnectPeriod: 3000,
+})
+
+const up = `thing/up/${productKey}/${deviceName}`
+const down = `thing/down/${productKey}/${deviceName}`
+
+client.on('connect', () => {
+  console.log('已连接')
+  client.subscribe(down, { qos: 1 })
+  // 每 5 秒上报一次遥测
+  setInterval(() => {
+    client.publish(up, JSON.stringify({
+      temperature: +(20 + Math.random() * 10).toFixed(2),
+      humidity: +(40 + Math.random() * 30).toFixed(2),
+    }), { qos: 1 })
+  }, 5000)
+})
+
+client.on('message', (topic, payload) => {
+  const msg = JSON.parse(payload.toString())
+  if (msg.method === 'property.set') {
+    // 应用属性并上报新值（平台据此清除影子 desired）
+    client.publish(up, JSON.stringify(msg.params), { qos: 1 })
+  }
+  if (msg.method === 'service.invoke') {
+    console.log('执行服务', msg.service, msg.params)
+  }
+})
+```
+
+## 二、事件上报
+
+```js
+client.publish(up, JSON.stringify({
+  method: 'event.post',
+  identifier: 'highTemp',
+  type: 'alert',
+  params: { temperature: 35.2 },
+}), { qos: 1 })
+```
+
+## 三、TCP 透传（DTU）注册 + 上报
+
+```js
+const net = require('net')
+
+const sock = net.connect({ host: '<平台地址>', port: 9100 })
+
+sock.on('data', (chunk) => {
+  const text = chunk.toString()
+  if (text.includes('OK')) {
+    console.log('注册成功')
+    // 上报 4 字节二进制帧（配合 decode 脚本）
+    const frame = Buffer.alloc(4)
+    frame.writeInt16BE(250, 0)  // 温度 x10 = 25.0
+    frame.writeInt16BE(550, 2)  // 湿度 x10 = 55.0
+    sock.write(frame)
+  }
+})
+
+// 注册包：三元组逗号分隔，\n 结尾
+sock.write(`${productKey},${deviceName},${secret}\n`)
+```
+
+## 四、HTTP 直传
+
+```bash
+curl -X POST http://<平台地址>/api/v1/http/telemetry \
+  -H "X-Device-Token: $(printf 'pk123:dev1:secret123' | base64)" \
+  -H "Content-Type: application/json" \
+  -d '{"temperature":25.5,"humidity":60.2}'
+```
+
+## 五、OpenAPI 签名访问
+
+### Node.js
+
+```js
+const crypto = require('crypto')
+
+const appKey = 'ak3f8a1c...'
+const appSecret = 'c9d2f1e8...'
+const ts = Math.floor(Date.now() / 1000)
+const sign = crypto.createHmac('sha256', appSecret)
+  .update(appKey + ts).digest('hex')
+
+const res = await fetch(`http://<平台地址>/openapi/v1/devices/3/latest`, {
+  headers: {
+    'X-App-Key': appKey,
+    'X-Timestamp': String(ts),
+    'X-Sign': sign,
+  },
+})
+console.log(await res.json())
+```
+
+### Python
+
+```python
+import time, hmac, hashlib, requests
+
+app_key = "ak3f8a1c..."
+app_secret = "c9d2f1e8..."
+ts = str(int(time.time()))
+sign = hmac.new(app_secret.encode(), (app_key + ts).encode(), hashlib.sha256).hexdigest()
+
+r = requests.get(
+    "http://<平台地址>/openapi/v1/devices/3/latest",
+    headers={"X-App-Key": app_key, "X-Timestamp": ts, "X-Sign": sign},
+)
+print(r.json())
+```
+
+## 六、换取动态令牌（tk:）
+
+```bash
+curl -X POST http://<平台地址>/api/v1/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"productKey":"pk123","deviceName":"dev1","secret":"secret123"}'
+```
+
+```json
+{ "code": 0, "data": { "token": "tk:1f2e...", "ttl": 3600 } }
+```
+
+之后用 `tk:1f2e...` 作为 MQTT password 连接即可。
+
+## 七、内置模拟器
+
+```bash
+cd tools/simulator
+npm install
+
+# MQTT 设备：每 5 秒上报温湿度，接收下行命令与影子
+node simulator.js <productKey> <deviceName> <deviceSecret> [broker]
+
+# TCP 透传（DTU）设备
+node dtu.js <productKey> <deviceName> <deviceSecret> [host] [port]
+
+# TCP + Modbus 从机模拟
+node dtu-modbus.js <productKey> <deviceName> <deviceSecret> [host] [port]
+```
+
+## 八、WebSocket 实时订阅（管理端）
+
+```js
+const ws = new WebSocket(`ws://<平台地址>/api/v1/ws?token=<JWT>`)
+
+ws.onopen = () => {
+  // 订阅设备遥测（deviceId 为数据库主键）
+  ws.send(JSON.stringify({ type: 'subscribe', deviceId: 3 }))
+}
+
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data)
+  // { type: 'telemetry', deviceId: 3, payload: { ts, data } }
+  // { type: 'device_status', deviceId: 3, payload: { status, ts } }
+  // { type: 'alarm', payload: { ruleName, level, message } }
+  console.log(msg)
+}
+```

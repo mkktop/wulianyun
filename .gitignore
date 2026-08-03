@@ -8,6 +8,11 @@ server/bin/
 # Node
 node_modules/
 web/dist/
+web/developer/
+
+# VitePress 构建产物
+docs/.vitepress/dist/
+docs/.vitepress/cache/
 
 # IDE / OS
 .idea/
