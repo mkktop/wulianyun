@@ -2,6 +2,8 @@ package ws
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -9,6 +11,14 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+// instanceID 本进程实例唯一标识：Redis pub/sub 会把广播回送给发送者自身，
+// 接收端据此跳过自己发出的消息，避免单实例下本地直推+回环各推一次造成重复。
+var instanceID = func() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}()
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
@@ -129,9 +139,10 @@ func (c *Client) writeLoop() {
 
 // wsBroadcastMsg 跨实例广播消息（包含目标用户和完整 OutMsg）
 type wsBroadcastMsg struct {
-	UserID      uint        `json:"userId"`
-	OnlyDevice  *uint       `json:"onlyDevice,omitempty"`
-	Msg         OutMsg      `json:"msg"`
+	InstanceID string `json:"instanceId"` // 发送方实例；接收方跳过自身回声
+	UserID     uint   `json:"userId"`
+	OnlyDevice *uint  `json:"onlyDevice,omitempty"`
+	Msg        OutMsg `json:"msg"`
 }
 
 // PushTelemetry 推送遥测给订阅了该设备的连接
@@ -159,9 +170,9 @@ func (h *Hub) push(userID uint, onlyDevice *uint, msg OutMsg) {
 	data, _ := json.Marshal(msg)
 	// 1. 本实例直接推送
 	h.localPush(userID, onlyDevice, data)
-	// 2. 通过 Redis Pub/Sub 广播给其他实例
+	// 2. 通过 Redis Pub/Sub 广播给其他实例（带实例 ID，接收端跳过自身回声）
 	if RedisPubSub != nil {
-		bm := wsBroadcastMsg{UserID: userID, OnlyDevice: onlyDevice, Msg: msg}
+		bm := wsBroadcastMsg{InstanceID: instanceID, UserID: userID, OnlyDevice: onlyDevice, Msg: msg}
 		bmData, _ := json.Marshal(bm)
 		_ = RedisPubSub.Publish(context.Background(), wsChannel, bmData)
 	}
@@ -193,6 +204,9 @@ func (h *Hub) localDispatch(bmData []byte) {
 	var bm wsBroadcastMsg
 	if err := json.Unmarshal(bmData, &bm); err != nil {
 		return
+	}
+	if bm.InstanceID == instanceID {
+		return // 自己发出的广播回环：本地已直推过，跳过避免重复
 	}
 	data, _ := json.Marshal(bm.Msg)
 	h.localPush(bm.UserID, bm.OnlyDevice, data)
