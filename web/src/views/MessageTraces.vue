@@ -105,6 +105,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { api, type Product, type Device } from '../api'
+import { fmtDateTime } from '../utils/format'
 
 const products = ref<Product[]>([])
 const devices = ref<Device[]>([])
@@ -188,7 +189,7 @@ function calcDuration(row: any): string {
   return parts.reduce((a: number, b: number) => a + b, 0) + 'ms'
 }
 function fmt(s: string | null) {
-  return s ? new Date(s).toLocaleString('zh-CN', { hour12: false }) : '-'
+  return fmtDateTime(s)
 }
 
 onMounted(() => {

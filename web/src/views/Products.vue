@@ -10,6 +10,9 @@
     </div>
 
     <el-table :data="list" v-loading="loading" stripe>
+      <template #empty>
+        <el-empty :description="secondary ? '暂无可用的下放产品，请联系主账号下放' : '暂无产品，点击右上角创建'" :image-size="80" />
+      </template>
       <el-table-column label="产品名称" min-width="140">
         <template #default="{ row }">
           <el-link type="primary" @click="$router.push(`/products/${row.id}`)">{{ row.name }}</el-link>
@@ -38,14 +41,21 @@
       <el-table-column label="创建时间" width="120">
         <template #default="{ row }">{{ fmtDate(row.createdAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="210" fixed="right">
+      <el-table-column label="操作" width="130" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="$router.push(`/products/${row.id}`)">详情</el-button>
-          <el-button link type="primary" size="small" @click="$router.push(`/products/${row.id}/edit`)">配置</el-button>
-          <el-button link type="primary" size="small" @click="$router.push(`/devices?productId=${row.id}`)">设备</el-button>
-          <el-popconfirm title="确定删除该产品？" @confirm="del(row)">
-            <template #reference><el-button link type="danger" size="small">删除</el-button></template>
-          </el-popconfirm>
+          <el-dropdown trigger="click" @command="(c: string) => onCmd(c, row)">
+            <el-button link type="primary" size="small">
+              更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-if="!secondary" command="edit">配置</el-dropdown-item>
+                <el-dropdown-item command="devices">设备列表</el-dropdown-item>
+                <el-dropdown-item v-if="!secondary" command="del" divided>删除</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </template>
       </el-table-column>
     </el-table>
@@ -59,8 +69,12 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, type Product, isSecondary } from '../api'
+import { fmtDate } from '../utils/format'
+
+const router = useRouter()
 
 const secondary = isSecondary()
 const list = ref<Product[]>([])
@@ -94,13 +108,18 @@ async function del(row: Product) {
   load()
 }
 
+function onCmd(cmd: string, row: Product) {
+  if (cmd === 'edit') router.push(`/products/${row.id}/edit`)
+  else if (cmd === 'devices') router.push(`/devices?productId=${row.id}`)
+  else if (cmd === 'del') {
+    ElMessageBox.confirm(`确定删除产品「${row.name}」？`, '删除确认', { type: 'warning' })
+      .then(() => del(row)).catch(() => {})
+  }
+}
+
 function copy(text: string) {
   navigator.clipboard.writeText(text)
   ElMessage.success('已复制')
-}
-
-function fmtDate(s: string) {
-  return s ? new Date(s).toLocaleDateString('zh-CN') : '-'
 }
 
 onMounted(load)

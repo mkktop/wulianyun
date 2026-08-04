@@ -27,6 +27,9 @@
     </div>
 
     <el-table :data="list" v-loading="loading" stripe>
+      <template #empty>
+        <el-empty description="暂无符合条件的设备" :image-size="80" />
+      </template>
       <el-table-column label="设备名称" min-width="140">
         <template #default="{ row }">
           <el-link type="primary" @click="$router.push(`/devices/${row.id}`)">{{ row.name }}</el-link>
@@ -50,16 +53,21 @@
       <el-table-column label="最后上线" width="160">
         <template #default="{ row }">{{ fmt(row.lastOnlineAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="210" fixed="right">
+      <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="$router.push(`/devices/${row.id}`)">详情</el-button>
           <el-button v-if="!viewOnly" link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button v-if="!viewOnly" link type="warning" size="small" @click="toggleDisable(row)">
-            {{ row.status === 'disabled' ? '启用' : '禁用' }}
-          </el-button>
-          <el-popconfirm v-if="!viewOnly" title="确定删除该设备？" @confirm="del(row)">
-            <template #reference><el-button link type="danger" size="small">删除</el-button></template>
-          </el-popconfirm>
+          <el-dropdown v-if="!viewOnly" trigger="click" @command="(c: string) => onCmd(c, row)">
+            <el-button link type="primary" size="small">
+              更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="toggle">{{ row.status === 'disabled' ? '启用' : '禁用' }}</el-dropdown-item>
+                <el-dropdown-item command="del" divided>删除</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </template>
       </el-table-column>
     </el-table>
@@ -147,8 +155,9 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, type Device, type DeviceGroup, type Product, isViewOnly } from '../api'
+import { fmtDateTime } from '../utils/format'
 import { realtime } from '../utils/realtime'
 
 const viewOnly = isViewOnly()
@@ -291,6 +300,19 @@ async function del(row: Device) {
   load()
 }
 
+function onCmd(cmd: string, row: Device) {
+  if (cmd === 'toggle') {
+    ElMessageBox.confirm(
+      row.status === 'disabled' ? `确定启用设备「${row.name}」？` : `确定禁用设备「${row.name}」？禁用后无法接入`,
+      row.status === 'disabled' ? '启用确认' : '禁用确认',
+      { type: 'warning' }
+    ).then(() => toggleDisable(row)).catch(() => {})
+  } else if (cmd === 'del') {
+    ElMessageBox.confirm(`确定删除设备「${row.name}」？`, '删除确认', { type: 'warning' })
+      .then(() => del(row)).catch(() => {})
+  }
+}
+
 function statusType(s: string) {
   return ({ online: 'success', offline: 'info', inactive: 'warning', disabled: 'danger' } as any)[s] || 'info'
 }
@@ -298,7 +320,7 @@ function statusText(s: string) {
   return ({ online: '在线', offline: '离线', inactive: '未激活', disabled: '已禁用' } as any)[s] || s
 }
 function fmt(s: string | null) {
-  return s ? new Date(s).toLocaleString('zh-CN', { hour12: false }) : '-'
+  return fmtDateTime(s)
 }
 
 // 设备状态实时刷新

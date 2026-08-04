@@ -147,6 +147,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { api, type Product, type Device } from '../api'
+import { fmtDateTime } from '../utils/format'
 
 const activeTab = ref('firmware')
 
@@ -306,7 +307,7 @@ function statusText(s: string) {
 }
 
 function fmt(s: string) {
-  return s ? new Date(s).toLocaleString('zh-CN', { hour12: false }) : '-'
+  return fmtDateTime(s)
 }
 
 onMounted(async () => {

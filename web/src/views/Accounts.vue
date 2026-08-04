@@ -92,6 +92,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { api, type Account } from '../api'
+import { fmtDate } from '../utils/format'
 
 const list = ref<Account[]>([])
 const loading = ref(false)
@@ -186,10 +187,6 @@ async function del(row: Account) {
   await api.deleteAccount(row.id)
   ElMessage.success('已删除')
   load()
-}
-
-function fmtDate(s: string) {
-  return s ? new Date(s).toLocaleDateString('zh-CN') : '-'
 }
 
 onMounted(load)

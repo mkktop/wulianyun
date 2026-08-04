@@ -60,7 +60,7 @@
               <el-button link type="primary" size="small" @click="loadShadow">刷新影子</el-button>
             </div>
           </template>
-          <template v-if="writableProps.length">
+          <template v-if="!viewOnly && writableProps.length">
             <div v-for="p in writableProps" :key="p.identifier" class="prop-row">
               <div class="prop-info">
                 <span class="prop-name">{{ p.name }}</span>
@@ -80,7 +80,7 @@
               <el-button size="small" type="primary" :loading="settingProp" @click="setModelProp(p)">设置</el-button>
             </div>
           </template>
-          <el-empty v-else description="产品未定义可写属性，请先在产品管理中配置物模型" :image-size="60" />
+          <el-empty v-else-if="!viewOnly" description="产品未定义可写属性，请先在产品管理中配置物模型" :image-size="60" />
           <el-divider style="margin: 12px 0" />
           <el-descriptions :column="1" border size="small">
             <el-descriptions-item label="期望值 desired">
@@ -94,7 +94,7 @@
         </el-card>
 
         <!-- 物模型服务调用 -->
-        <el-card v-if="services.length" shadow="never" style="margin-top: 16px">
+        <el-card v-if="services.length && !viewOnly" shadow="never" style="margin-top: 16px">
           <template #header>服务调用（物模型）</template>
           <div class="svc-row">
             <el-button
@@ -106,7 +106,7 @@
           </div>
         </el-card>
 
-        <el-card shadow="never" style="margin-top: 16px">
+        <el-card v-if="!viewOnly" shadow="never" style="margin-top: 16px">
           <template #header>命令下发（原始 JSON 调试）</template>
           <el-input v-model="command" type="textarea" :rows="4" placeholder='{"switch": 1}' />
           <el-button type="primary" style="margin-top: 12px" :loading="sending" @click="send">下发</el-button>
@@ -184,7 +184,7 @@
       <el-tab-pane v-if="device?.isGateway" label="子设备" name="subdevices">
         <el-card shadow="never">
           <div class="toolbar">
-            <el-button type="primary" @click="showAddSub = true">添加子设备</el-button>
+            <el-button v-if="!viewOnly" type="primary" @click="showAddSub = true">添加子设备</el-button>
           </div>
           <el-table :data="subDevices" v-loading="subLoading" stripe>
             <el-table-column prop="id" label="ID" width="80" />
@@ -195,7 +195,7 @@
                 <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="100">
+            <el-table-column v-if="!viewOnly" label="操作" width="100">
               <template #default="{ row }">
                 <el-button link type="danger" @click="removeSub(row.id)">移除</el-button>
               </template>
@@ -225,11 +225,14 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
-import { api, type Device, type TslProperty, type TslService } from '../api'
+import { api, type Device, type TslProperty, type TslService, isViewOnly } from '../api'
+import { fmtDateTime } from '../utils/format'
 import { realtime } from '../utils/realtime'
 
 const route = useRoute()
 const id = Number(route.params.id)
+// 只读账号：隐藏所有下行写操作（后端 RequireOperate 兜底）
+const viewOnly = isViewOnly()
 const device = ref<Device | null>(null)
 const latest = ref<Record<string, any>>({})
 const lastTs = ref(0)
@@ -456,7 +459,7 @@ function statusText(s: string) {
   return ({ online: '在线', offline: '离线', inactive: '未激活', disabled: '已禁用' } as any)[s] || s
 }
 function fmt(s: string | null) {
-  return s ? new Date(s).toLocaleString('zh-CN', { hour12: false }) : '-'
+  return fmtDateTime(s)
 }
 function copy(text: string) {
   navigator.clipboard.writeText(text)

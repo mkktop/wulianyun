@@ -122,6 +122,7 @@
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, type Product, type Device } from '../api'
+import { fmtTime } from '../utils/format'
 
 const products = ref<Product[]>([])
 const devices = ref<Device[]>([])
@@ -260,10 +261,6 @@ function startPolling() {
 
 function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-}
-
-function fmtTime(ts: number) {
-  return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false })
 }
 
 function formatPayload(p: any) {

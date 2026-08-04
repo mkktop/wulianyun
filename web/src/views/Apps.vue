@@ -61,6 +61,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, type OpenApp } from '../api'
+import { fmtDateTime } from '../utils/format'
 
 const list = ref<OpenApp[]>([])
 const loading = ref(false)
@@ -112,7 +113,7 @@ function copy(text: string) {
 }
 
 function fmt(s: string) {
-  return s ? new Date(s).toLocaleString('zh-CN', { hour12: false }) : '-'
+  return fmtDateTime(s)
 }
 
 onMounted(load)

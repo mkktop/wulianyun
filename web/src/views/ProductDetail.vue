@@ -11,7 +11,7 @@
             <div>MQTT 接入地址：{{ host }}:1883</div>
             <div>TCP 接入地址：{{ host }}:9100</div>
           </div>
-          <el-button link type="primary" @click="$router.push(`/products/${product.id}/edit`)">编辑</el-button>
+          <el-button v-if="canWrite" link type="primary" @click="$router.push(`/products/${product.id}/edit`)">编辑</el-button>
         </div>
         <div class="info-item"><div class="label">ProductKey</div><div class="val">{{ product.productKey }}
           <el-button link type="primary" size="small" @click="copy(product.productKey)">复制</el-button></div>
@@ -75,6 +75,7 @@
                 <el-icon><Download /></el-icon>&nbsp;导出 TSL
               </el-button>
               <el-upload
+                v-if="canWrite"
                 :show-file-list="false" accept=".json" :before-upload="importTsl"
                 style="display: inline-block; margin-left: 8px"
               >
@@ -89,7 +90,7 @@
           <ModbusPointEditor v-else-if="product.accessMode === 'modbus'"
             v-model:points="points" :product-id="product.id" />
           <CodecEditor v-else v-model:script="script" :product-id="product.id" />
-          <div style="margin-top: 12px; text-align: right">
+          <div v-if="canWrite" style="margin-top: 12px; text-align: right">
             <el-button type="primary" :loading="savingDef" @click="saveDefinition">保存</el-button>
           </div>
         </el-card>
@@ -101,7 +102,7 @@
           <div class="toolbar">
             <span />
             <div>
-              <el-button @click="batchVisible = true">批量导入</el-button>
+              <el-button v-if="!viewOnly" @click="batchVisible = true">批量导入</el-button>
               <el-button type="primary" @click="$router.push(`/devices?productId=${product.id}`)">设备管理页</el-button>
             </div>
           </div>
@@ -175,10 +176,10 @@
           <el-alert type="info" :closable="false" style="margin-bottom: 12px">
             JSON 格式配置，设备可通过 method=config.get 主动拉取；也可点击"推送"广播给产品下全部在线设备（当前版本 v{{ cfgVersion }}）
           </el-alert>
-          <el-input v-model="cfgText" type="textarea" :rows="12" placeholder='{"reportInterval": 60}' spellcheck="false" style="font-family: monospace" />
+          <el-input v-model="cfgText" type="textarea" :rows="12" :disabled="!canWrite" placeholder='{"reportInterval": 60}' spellcheck="false" style="font-family: monospace" />
           <div style="margin-top: 12px; display: flex; justify-content: space-between">
-            <el-button @click="broadcastVisible = true">自定义广播</el-button>
-            <div>
+            <el-button v-if="canWrite" @click="broadcastVisible = true">自定义广播</el-button>
+            <div v-if="canWrite">
               <el-button type="primary" plain :loading="cfgSaving" @click="saveCfg">保存配置</el-button>
               <el-button type="primary" :loading="cfgPushing" @click="pushCfg">保存并推送</el-button>
             </div>
@@ -186,8 +187,8 @@
         </el-card>
       </el-tab-pane>
 
-      <!-- 产品下放（仅一级） -->
-      <el-tab-pane v-if="isPrimary" label="下放管理" name="grants">
+      <!-- 产品下放（一级/超管，与后端 PrimaryAuth 一致） -->
+      <el-tab-pane v-if="canWrite" label="下放管理" name="grants">
         <el-card shadow="never">
           <el-alert type="info" :closable="false" style="margin-bottom: 12px">
             将该产品下放给名下二级账号，二级即可用此产品类型注册和管理自己的设备（产品定义对二级只读）
@@ -291,8 +292,9 @@ import * as echarts from 'echarts'
 import {
   api, type Product, type Device, type EventReport, type CommandLog,
   type ModbusPoint, type TslProperty, type TslEvent, type TslService,
-  currentTier, type Account, type ProductGrant
+  isSecondary, isViewOnly, type Account, type ProductGrant
 } from '../api'
+import { fmtDateTime } from '../utils/format'
 import ThingModelEditor from '../components/ThingModelEditor.vue'
 import ModbusPointEditor from '../components/ModbusPointEditor.vue'
 import CodecEditor from '../components/CodecEditor.vue'
@@ -348,8 +350,10 @@ const broadcastVisible = ref(false)
 const broadcastText = ref('')
 const broadcasting = ref(false)
 
-// 产品下放（仅一级）
-const isPrimary = currentTier() === 'primary'
+// 产品定义写权限：二级对下放产品只读（后端 mustOwnProduct 兜底）；一级/超管可写定义、可下放
+const canWrite = !isSecondary()
+// 只读账号：不能创建设备等写操作（后端 RequireOperate 兜底）
+const viewOnly = isViewOnly()
 const grants = ref<ProductGrant[]>([])
 const grantLoading = ref(false)
 const grantVisible = ref(false)
@@ -378,7 +382,7 @@ function evText(t: string) {
   return ({ info: '信息', alert: '告警', fault: '故障' } as any)[t] || t
 }
 function fmt(s: string | null) {
-  return s ? new Date(s).toLocaleString('zh-CN', { hour12: false }) : '-'
+  return fmtDateTime(s)
 }
 function copy(text: string) {
   navigator.clipboard.writeText(text)

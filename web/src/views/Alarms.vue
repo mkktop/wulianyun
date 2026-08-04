@@ -95,6 +95,7 @@ import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { api, type Alarm } from '../api'
+import { fmtDateTime } from '../utils/format'
 import { realtime } from '../utils/realtime'
 
 const list = ref<Alarm[]>([])
@@ -169,7 +170,7 @@ async function confirm(row: Alarm) {
 }
 
 function fmt(s: string | null) {
-  return s ? new Date(s).toLocaleString('zh-CN', { hour12: false }) : '-'
+  return fmtDateTime(s)
 }
 
 // 新告警实时刷新列表
