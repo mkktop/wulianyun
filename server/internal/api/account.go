@@ -19,23 +19,78 @@ type accountCreateReq struct {
 	Permission string `json:"permission"` // operate(可操作) / view(只读)，默认 operate
 }
 
-// ListAccounts 一级列出自己名下的二级账号（附设备数/下放产品数）
+// ListAccounts 一级列出自己名下的二级账号（附设备数/下放产品数）。
+//   - 默认分页 + 批量聚合 stats（避免 N+1）
+//   - ?all=1：返回精简全量（仅 id/username/nickname），供产品下放下拉选择
+// @Summary      二级账号列表
+// @Description  一级主账号分页查询名下二级账号，附设备数与下放产品数；all=1 返回精简全量供下拉
+// @Tags         账号
+// @Produce      json
+// @Param        all query int false "传 1 返回精简全量(下拉用)"
+// @Param        page query int false "页码"
+// @Param        size query int false "每页数量"
+// @Success      200  {object}  Resp
+// @Failure      400  {object}  Resp
+// @Router       /accounts [get]
+// @Security     BearerAuth
 func ListAccounts(c *gin.Context) {
-	var list []model.User
-	repository.DB.Where("parent_id = ?", UID(c)).Order("id asc").Find(&list)
+	// 下拉场景：精简全量
+	if atoi(c.Query("all")) == 1 {
+		var list []struct {
+			ID       uint   `json:"id"`
+			Username string `json:"username"`
+			Nickname string `json:"nickname"`
+		}
+		repository.DB.Model(&model.User{}).Select("id, username, nickname").
+			Where("parent_id = ?", UID(c)).Order("id desc").Find(&list)
+		OK(c, list)
+		return
+	}
+
+	q := repository.DB.Model(&model.User{}).Where("parent_id = ?", UID(c))
+	var total int64
+	q.Count(&total)
+	page, size := pageArgs(c)
+	var users []model.User
+	q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&users)
+
 	type accountWithStats struct {
 		model.User
 		DeviceCount int64 `json:"deviceCount"`
 		GrantCount  int64 `json:"grantCount"`
 	}
-	out := make([]accountWithStats, 0, len(list))
-	for _, u := range list {
-		var dc, gc int64
-		repository.DB.Model(&model.Device{}).Where("user_id = ?", u.ID).Count(&dc)
-		repository.DB.Model(&model.ProductGrant{}).Where("secondary_id = ?", u.ID).Count(&gc)
-		out = append(out, accountWithStats{User: u, DeviceCount: dc, GrantCount: gc})
+	out := make([]accountWithStats, 0, len(users))
+	// 批量聚合 stats，避免 N+1（原先每行 2 次 Count → 现仅 2 条 GROUP BY 查询）
+	if len(users) > 0 {
+		ids := make([]uint, len(users))
+		for i, u := range users {
+			ids[i] = u.ID
+		}
+		deviceCount := make(map[uint]int64)
+		grantCount := make(map[uint]int64)
+		var dcRows []struct {
+			UserID uint
+			Cnt    int64
+		}
+		repository.DB.Model(&model.Device{}).Select("user_id, count(*) as cnt").
+			Where("user_id IN ?", ids).Group("user_id").Scan(&dcRows)
+		for _, r := range dcRows {
+			deviceCount[r.UserID] = r.Cnt
+		}
+		var gcRows []struct {
+			SecondaryID uint
+			Cnt         int64
+		}
+		repository.DB.Model(&model.ProductGrant{}).Select("secondary_id, count(*) as cnt").
+			Where("secondary_id IN ?", ids).Group("secondary_id").Scan(&gcRows)
+		for _, r := range gcRows {
+			grantCount[r.SecondaryID] = r.Cnt
+		}
+		for _, u := range users {
+			out = append(out, accountWithStats{User: u, DeviceCount: deviceCount[u.ID], GrantCount: grantCount[u.ID]})
+		}
 	}
-	OK(c, out)
+	OK(c, PageData{Total: total, List: out})
 }
 
 // CreateAccount 一级创建二级账号

@@ -77,6 +77,7 @@ services:
     volumes:
       - ./config.prod.yaml:/app/configs/config.yaml:ro
       - uploads:/app/uploads
+      - ../../server/server-linux:/app/server:ro   # bind-mount 二进制：部署只需替换此文件 + restart 容器
     ports:
       - "9100:9100"       # TCP 透传网关（DTU 设备）
     networks: [iot-net]
@@ -99,6 +100,11 @@ services:
       context: ../../web
       dockerfile: Dockerfile
     container_name: iot-web
+    volumes:
+      # bind-mount 前端产物：仅覆盖会变的子路径，保留 image 内 baked-in 的 developer/（VitePress 文档）
+      - ../../web/dist/assets:/usr/share/nginx/html/assets:ro
+      - ../../web/dist/index.html:/usr/share/nginx/html/index.html:ro
+      - ../../web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - "80:80"           # 管理后台（nginx 反代 /api 到 server:8080）
     networks: [iot-net]

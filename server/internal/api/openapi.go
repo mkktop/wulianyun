@@ -35,10 +35,24 @@ func CreateOpenApp(c *gin.Context) {
 	OK(c, app)
 }
 
+// @Summary      应用列表
+// @Description  分页查询当前账号名下的开放平台应用
+// @Tags         应用
+// @Produce      json
+// @Param        page query int false "页码"
+// @Param        size query int false "每页数量"
+// @Success      200  {object}  Resp
+// @Failure      400  {object}  Resp
+// @Router       /apps [get]
+// @Security     BearerAuth
 func ListOpenApps(c *gin.Context) {
+	q := repository.DB.Model(&model.OpenApp{}).Scopes(ownedScope(c, ""))
+	var total int64
+	q.Count(&total)
+	page, size := pageArgs(c)
 	var list []model.OpenApp
-	repository.DB.Scopes(ownedScope(c, "")).Order("id desc").Find(&list)
-	OK(c, list)
+	q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list)
+	OK(c, PageData{Total: total, List: list})
 }
 
 func UpdateOpenApp(c *gin.Context) {

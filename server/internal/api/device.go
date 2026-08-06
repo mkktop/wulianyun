@@ -62,6 +62,20 @@ func CreateDevice(c *gin.Context) {
 	OK(c, d)
 }
 
+// @Summary      设备列表
+// @Description  分页查询当前账号可见的设备，支持按产品/状态/分组过滤并补全产品与分组名
+// @Tags         设备
+// @Produce      json
+// @Param        productId query int false "产品ID"
+// @Param        keyword query string false "设备名称模糊关键字"
+// @Param        status query string false "设备状态(online/offline/inactive/disabled)"
+// @Param        groupId query int false "分组ID"
+// @Param        page query int false "页码"
+// @Param        size query int false "每页数量"
+// @Success      200  {object}  Resp
+// @Failure      400  {object}  Resp
+// @Router       /devices [get]
+// @Security     BearerAuth
 func ListDevices(c *gin.Context) {
 	q := repository.DB.Model(&model.Device{}).Scopes(ownedScope(c, "devices.user_id"))
 	if pid := c.Query("productId"); pid != "" {
@@ -112,6 +126,15 @@ func ListDevices(c *gin.Context) {
 	OK(c, PageData{Total: total, List: list})
 }
 
+// @Summary      设备详情
+// @Description  获取指定设备（附带产品名）
+// @Tags         设备
+// @Produce      json
+// @Param        id path int true "设备ID"
+// @Success      200  {object}  Resp
+// @Failure      400  {object}  Resp
+// @Router       /devices/{id} [get]
+// @Security     BearerAuth
 func GetDevice(c *gin.Context) {
 	var d model.Device
 	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&d).Error; err != nil {
@@ -182,15 +205,30 @@ func DeleteDevice(c *gin.Context) {
 }
 
 // ListDeviceEvents 设备上下线事件日志
+// @Summary      设备事件列表
+// @Description  分页查询指定设备的上下线事件日志
+// @Tags         设备
+// @Produce      json
+// @Param        id path int true "设备ID"
+// @Param        page query int false "页码"
+// @Param        size query int false "每页数量"
+// @Success      200  {object}  Resp
+// @Failure      400  {object}  Resp
+// @Router       /devices/{id}/events [get]
+// @Security     BearerAuth
 func ListDeviceEvents(c *gin.Context) {
 	var d model.Device
 	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&d).Error; err != nil {
 		Fail(c, 404, "设备不存在")
 		return
 	}
+	q := repository.DB.Model(&model.DeviceEvent{}).Where("device_id = ?", d.ID)
+	var total int64
+	q.Count(&total)
+	page, size := pageArgs(c)
 	var list []model.DeviceEvent
-	repository.DB.Where("device_id = ?", d.ID).Order("id desc").Limit(50).Find(&list)
-	OK(c, list)
+	q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list)
+	OK(c, PageData{Total: total, List: list})
 }
 
 // ListSubDevices 获取网关的子设备列表

@@ -12,6 +12,7 @@ import (
 
 	"iot-platform/internal/api"
 	"iot-platform/internal/config"
+	_ "iot-platform/internal/docs" // Swagger 文档（swag init 生成，import 触发 SwaggerInfo 注册）
 	"iot-platform/internal/gateway"
 	"iot-platform/internal/model"
 	"iot-platform/internal/mqtt"
@@ -22,6 +23,14 @@ import (
 	"iot-platform/internal/ws"
 )
 
+// @title           KK 物联云 API
+// @version         1.0
+// @description     企业 IoT 设备管理平台接口文档（设备 / 产品 / 物模型 / 规则 / 告警 / OTA / 开放平台）
+// @host            localhost:8080
+// @BasePath        /api/v1
+// @securityDefinitions.apikey BearerAuth
+// @in   header
+// @name Authorization
 func main() {
 	confPath := flag.String("conf", "configs/config.yaml", "配置文件路径")
 	flag.Parse()

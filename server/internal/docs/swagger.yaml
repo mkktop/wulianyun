@@ -1,0 +1,371 @@
+basePath: /api/v1
+definitions:
+  api.Resp:
+    properties:
+      code:
+        type: integer
+      data: {}
+      msg:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: 企业 IoT 设备管理平台接口文档（设备 / 产品 / 物模型 / 规则 / 告警 / OTA / 开放平台）
+  title: KK 物联云 API
+  version: "1.0"
+paths:
+  /accounts:
+    get:
+      description: 一级主账号分页查询名下二级账号，附设备数与下放产品数；all=1 返回精简全量供下拉
+      parameters:
+      - description: 传 1 返回精简全量(下拉用)
+        in: query
+        name: all
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Resp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.Resp'
+      security:
+      - BearerAuth: []
+      summary: 二级账号列表
+      tags:
+      - 账号
+  /alarms:
+    get:
+      description: 分页查询当前账号可见的告警记录，支持按状态与级别过滤
+      parameters:
+      - description: 告警状态(firing/resolved)
+        in: query
+        name: status
+        type: string
+      - description: 告警级别
+        in: query
+        name: level
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Resp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.Resp'
+      security:
+      - BearerAuth: []
+      summary: 告警记录列表
+      tags:
+      - 告警
+  /apps:
+    get:
+      description: 分页查询当前账号名下的开放平台应用
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Resp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.Resp'
+      security:
+      - BearerAuth: []
+      summary: 应用列表
+      tags:
+      - 应用
+  /auth/login:
+    post:
+      description: 校验用户名密码，校验通过后签发 JWT
+      parameters:
+      - description: 登录凭证 {username, password}
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Resp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.Resp'
+      summary: 用户登录
+      tags:
+      - 认证
+  /auth/register:
+    post:
+      description: 注册一个新用户账号（默认角色 user）
+      parameters:
+      - description: 注册信息 {username, password, nickname}
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Resp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.Resp'
+      summary: 用户注册
+      tags:
+      - 认证
+  /devices:
+    get:
+      description: 分页查询当前账号可见的设备，支持按产品/状态/分组过滤并补全产品与分组名
+      parameters:
+      - description: 产品ID
+        in: query
+        name: productId
+        type: integer
+      - description: 设备名称模糊关键字
+        in: query
+        name: keyword
+        type: string
+      - description: 设备状态(online/offline/inactive/disabled)
+        in: query
+        name: status
+        type: string
+      - description: 分组ID
+        in: query
+        name: groupId
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Resp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.Resp'
+      security:
+      - BearerAuth: []
+      summary: 设备列表
+      tags:
+      - 设备
+  /devices/{id}:
+    get:
+      description: 获取指定设备（附带产品名）
+      parameters:
+      - description: 设备ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Resp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.Resp'
+      security:
+      - BearerAuth: []
+      summary: 设备详情
+      tags:
+      - 设备
+  /devices/{id}/events:
+    get:
+      description: 分页查询指定设备的上下线事件日志
+      parameters:
+      - description: 设备ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Resp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.Resp'
+      security:
+      - BearerAuth: []
+      summary: 设备事件列表
+      tags:
+      - 设备
+  /groups:
+    get:
+      description: 查询当前账号名下全部分组，并批量聚合每组设备数
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Resp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.Resp'
+      security:
+      - BearerAuth: []
+      summary: 设备分组列表
+      tags:
+      - 分组
+  /products:
+    get:
+      description: 分页查询当前账号可见的产品，附带每产品设备数
+      parameters:
+      - description: 名称模糊关键字
+        in: query
+        name: keyword
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Resp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.Resp'
+      security:
+      - BearerAuth: []
+      summary: 产品列表
+      tags:
+      - 产品
+    post:
+      description: 新建设备产品（自动生成 ProductKey；一型一密时生成 ProductSecret）
+      parameters:
+      - description: 产品信息 {name, protocol, accessMode, secretMode, pollInterval, description,
+          frameMode, ...}
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Resp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.Resp'
+      security:
+      - BearerAuth: []
+      summary: 创建产品
+      tags:
+      - 产品
+  /products/{id}:
+    get:
+      description: 获取指定产品（含设备数），需有查看权限
+      parameters:
+      - description: 产品ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Resp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.Resp'
+      security:
+      - BearerAuth: []
+      summary: 产品详情
+      tags:
+      - 产品
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

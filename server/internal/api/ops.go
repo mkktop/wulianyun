@@ -112,11 +112,36 @@ func CreateGroup(c *gin.Context) {
 	OK(c, g)
 }
 
+// @Summary      设备分组列表
+// @Description  查询当前账号名下全部分组，并批量聚合每组设备数
+// @Tags         分组
+// @Produce      json
+// @Success      200  {object}  Resp
+// @Failure      400  {object}  Resp
+// @Router       /groups [get]
+// @Security     BearerAuth
 func ListGroups(c *gin.Context) {
 	var list []model.DeviceGroup
-	repository.DB.Scopes(ownedScope(c, "")).Order("id asc").Find(&list)
-	for i := range list {
-		repository.DB.Model(&model.Device{}).Where("group_id = ?", list[i].ID).Count(&list[i].DeviceCount)
+	repository.DB.Scopes(ownedScope(c, "")).Order("id desc").Find(&list)
+	// 批量聚合 deviceCount，避免 N+1（原先每行一次 Count → 现仅 1 条 GROUP BY 查询）
+	if len(list) > 0 {
+		ids := make([]uint, len(list))
+		for i, g := range list {
+			ids[i] = g.ID
+		}
+		var rows []struct {
+			GroupID uint
+			Cnt     int64
+		}
+		repository.DB.Model(&model.Device{}).Select("group_id, count(*) as cnt").
+			Where("group_id IN ?", ids).Group("group_id").Scan(&rows)
+		m := make(map[uint]int64)
+		for _, r := range rows {
+			m[r.GroupID] = r.Cnt
+		}
+		for i := range list {
+			list[i].DeviceCount = m[list[i].ID]
+		}
 	}
 	OK(c, list)
 }

@@ -35,6 +35,15 @@ type productReq struct {
 	HeartbeatReply  string `json:"heartbeatReply"`
 }
 
+// @Summary      创建产品
+// @Description  新建设备产品（自动生成 ProductKey；一型一密时生成 ProductSecret）
+// @Tags         产品
+// @Produce      json
+// @Param        body body object true "产品信息 {name, protocol, accessMode, secretMode, pollInterval, description, frameMode, ...}"
+// @Success      200  {object}  Resp
+// @Failure      400  {object}  Resp
+// @Router       /products [post]
+// @Security     BearerAuth
 func CreateProduct(c *gin.Context) {
 	if isSecondary(c) {
 		Fail(c, 403, "二级账号无法创建产品，请使用主账号下放的产品")
@@ -88,6 +97,17 @@ func CreateProduct(c *gin.Context) {
 	OK(c, p)
 }
 
+// @Summary      产品列表
+// @Description  分页查询当前账号可见的产品，附带每产品设备数
+// @Tags         产品
+// @Produce      json
+// @Param        keyword query string false "名称模糊关键字"
+// @Param        page query int false "页码"
+// @Param        size query int false "每页数量"
+// @Success      200  {object}  Resp
+// @Failure      400  {object}  Resp
+// @Router       /products [get]
+// @Security     BearerAuth
 func ListProducts(c *gin.Context) {
 	var list []model.Product
 	q := repository.DB.Model(&model.Product{}).Scopes(productScope(c))
@@ -107,6 +127,15 @@ func ListProducts(c *gin.Context) {
 	OK(c, PageData{Total: total, List: list})
 }
 
+// @Summary      产品详情
+// @Description  获取指定产品（含设备数），需有查看权限
+// @Tags         产品
+// @Produce      json
+// @Param        id path int true "产品ID"
+// @Success      200  {object}  Resp
+// @Failure      400  {object}  Resp
+// @Router       /products/{id} [get]
+// @Security     BearerAuth
 func GetProduct(c *gin.Context) {
 	p, err := canViewProduct(c, c.Param("id"))
 	if err != nil {

@@ -19,6 +19,14 @@ type authReq struct {
 	Nickname string `json:"nickname"`
 }
 
+// @Summary      用户注册
+// @Description  注册一个新用户账号（默认角色 user）
+// @Tags         认证
+// @Produce      json
+// @Param        body body object true "注册信息 {username, password, nickname}"
+// @Success      200  {object}  Resp
+// @Failure      400  {object}  Resp
+// @Router       /auth/register [post]
 func Register(c *gin.Context) {
 	var req authReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -43,6 +51,14 @@ func Register(c *gin.Context) {
 	OK(c, gin.H{"id": user.ID})
 }
 
+// @Summary      用户登录
+// @Description  校验用户名密码，校验通过后签发 JWT
+// @Tags         认证
+// @Produce      json
+// @Param        body body object true "登录凭证 {username, password}"
+// @Success      200  {object}  Resp
+// @Failure      400  {object}  Resp
+// @Router       /auth/login [post]
 func Login(c *gin.Context) {
 	var req authReq
 	if err := c.ShouldBindJSON(&req); err != nil {

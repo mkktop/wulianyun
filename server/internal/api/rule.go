@@ -115,6 +115,18 @@ func DeleteRule(c *gin.Context) {
 }
 
 // ListAlarms 告警记录列表
+// @Summary      告警记录列表
+// @Description  分页查询当前账号可见的告警记录，支持按状态与级别过滤
+// @Tags         告警
+// @Produce      json
+// @Param        status query string false "告警状态(firing/resolved)"
+// @Param        level query string false "告警级别"
+// @Param        page query int false "页码"
+// @Param        size query int false "每页数量"
+// @Success      200  {object}  Resp
+// @Failure      400  {object}  Resp
+// @Router       /alarms [get]
+// @Security     BearerAuth
 func ListAlarms(c *gin.Context) {
 	q := repository.DB.Model(&model.Alarm{}).Scopes(ownedScope(c, ""))
 	if st := c.Query("status"); st != "" {
