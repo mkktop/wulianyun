@@ -22,3 +22,9 @@ Thumbs.db
 
 # Claude Code 本地配置（含权限规则/敏感命令，勿提交）
 .claude/
+
+# 离线交付包构建产物（deploy/dist/ 下，本地/CI 跑 build.sh 后生成，勿提交）
+deploy/dist/.build/
+deploy/dist/*.tar.gz
+deploy/dist/*.tar.gz.sha256
+deploy/dist/kk-iot-*/

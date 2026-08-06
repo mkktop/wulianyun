@@ -1,0 +1,7 @@
+# KK物联云 前端薄镜像（单阶段，COPY 预构建 dist）
+# 构建上下文 = build.sh 组装的暂存目录（含 dist/ + nginx.conf）
+# 注意：不在客户机构建。dist 由构建机 npm run build 产出（含 developer/ 开发文档）。
+FROM nginx:1.27-alpine
+COPY dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80

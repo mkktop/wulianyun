@@ -1,0 +1,155 @@
+# KK物联云 生产部署 —— 离线交付版（纯镜像，无 build）
+# 启动：docker compose -p kk-iot --env-file ../.env -f docker-compose.yml up -d
+# 暴露端口：80(web) / 1883(MQTT) / 9100(DTU) ； 18083(EMQX Dashboard) 仅 127.0.0.1
+# 不暴露：8080(后端) / 5432(数据库) / 6379(Redis) —— 仅内部网络
+#
+# 关键设计：
+# - 顶层 name: kk-iot 固定项目名 → 卷名稳定（kk-iot_pgdata），换解压目录不丢数据
+# - server/web 全用预构建 image（VER/ARCH 来自 .env），绝不在本机构建
+# - 内存限制适配弱机（1.6G 参考，可按机器 RAM 放大，见 README）
+# - stop_grace_period 15s 给 server 收 SIGTERM 后刷 telemetry buffer 留时间
+
+name: kk-iot
+
+networks:
+  iot-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redis-data:
+  emqx-data:
+  uploads:
+
+services:
+  postgres:
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: iot-postgres
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - effective_cache_size=384MB
+      - -c
+      - max_connections=50
+      - -c
+      - maintenance_work_mem=64MB
+    environment:
+      POSTGRES_USER: iot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: iot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [iot-net]
+    shm_size: 128mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iot -d iot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: iot-redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes", "--maxmemory", "96mb", "--maxmemory-policy", "allkeys-lru"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}   # healthcheck 容器内 $REDIS_PASSWORD 非空
+    volumes:
+      - redis-data:/data
+    networks: [iot-net]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+    restart: unless-stopped
+
+  emqx:
+    image: emqx/emqx:5.8
+    container_name: iot-emqx
+    environment:
+      EMQX_NODE__NAME: "emqx@emqx"
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: "${EMQX_DASHBOARD_PASSWORD}"
+    volumes:
+      - ./emqx.conf:/opt/emqx/etc/emqx.conf:ro
+      - emqx-data:/opt/emqx/data
+    ports:
+      - "1883:1883"       # MQTT 设备接入
+      - "8083:8083"       # MQTT over WebSocket（可选）
+      - "127.0.0.1:18083:18083"   # Dashboard 仅本机（SSH 隧道访问）
+    networks: [iot-net]
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+    restart: unless-stopped
+
+  server:
+    image: kk-iot/server:${VER}-${ARCH}
+    container_name: iot-server
+    volumes:
+      - ./config.prod.yaml:/app/configs/config.yaml:ro   # install.sh 渲染到 compose/config.prod.yaml
+      - uploads:/app/uploads
+    ports:
+      - "9100:9100"       # TCP 透传网关（DTU 设备）
+    networks: [iot-net]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      emqx:
+        condition: service_started
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/v1/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    restart: unless-stopped
+
+  web:
+    image: kk-iot/web:${VER}-${ARCH}
+    container_name: iot-web
+    ports:
+      - "80:80"           # 管理后台（nginx 反代 /api 到 server:8080）
+    networks: [iot-net]
+    depends_on:
+      - server
+    deploy:
+      resources:
+        limits:
+          memory: 48m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped

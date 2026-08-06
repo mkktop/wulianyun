@@ -1,0 +1,92 @@
+name: 构建离线交付包
+
+# 触发：
+#   1. 手动（workflow_dispatch）：可选目标架构
+#   2. 打 tag v*（如 v1.0.0）：自动构建 amd64 包并发布 GitHub Release
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 目标架构（多架构用空格分隔）
+        required: true
+        default: amd64
+        type: choice
+        options:
+          - amd64
+          - arm64
+          - amd64 arm64
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # tag 触发时 gh release create 需要
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # tag 触发无 inputs → 默认 amd64；arm64 需 runner 先注册 QEMU
+      ARCH: ${{ inputs.arch || 'amd64' }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go（版本随 server/go.mod）
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            docs/package-lock.json
+
+      - name: 注册 QEMU（仅 arm64 跨架构构建需要）
+        if: contains(env.ARCH, 'arm64')
+        run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
+      - name: 构建交付包
+        working-directory: deploy/dist
+        env:
+          GO: go   # 用 setup-go 注入 PATH 的 go（CI 上无 .tools/go）
+        run: bash build.sh $ARCH
+
+      - name: 校验 tag 与 VERSION 一致
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          VER="$(tr -d '[:space:]' < VERSION)"
+          echo "tag=$TAG  VERSION=$VER"
+          [ "$TAG" = "$VER" ] || { echo "::error::tag($TAG) 与 VERSION($VER) 不一致，请先更新 VERSION"; exit 1; }
+
+      - name: 上传交付包为 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kk-iot-dist
+          path: deploy/dist/kk-iot-*.tar.gz*
+          if-no-files-found: error
+
+      - name: 发布 Release（仅 tag 触发）
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="$(tr -d '[:space:]' < VERSION)"
+          gh release create "${GITHUB_REF#refs/tags/}" \
+            --title "KK物联云 v${VER}" \
+            --notes "私有化离线交付包 v${VER}。
+
+          下载对应架构的 \`kk-iot-*.tar.gz\`，在目标 Linux 机器执行：
+          \`\`\`bash
+          tar xzf kk-iot-*.tar.gz
+          cd kk-iot-*
+          bash install.sh
+          \`\`\`
+          详见包内 README.md。" \
+            deploy/dist/kk-iot-*.tar.gz*

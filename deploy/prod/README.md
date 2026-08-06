@@ -1,5 +1,9 @@
 # KK 物联云 —— 生产部署手册
 
+> ⚠️ **私有化交付请改用 [`deploy/dist/`](../dist/) 离线交付包**（客户机 `docker load` + `compose up`，无需构建）。
+> 本路径是**在线构建**（compose 带 `build:`，要求构建机即服务器、内存 ≥2GB），仅适合内部开发 / staging。
+> 本手册里的 `docker compose up -d --build` 在弱机（<2GB）上会拉 `golang`/`node` 编译而 OOM 卡死，生产交付勿用。
+
 > 全 Docker Compose 一键部署（Linux x86_64，IP 访问）。一条命令拉起后端 + 前端 + 数据库 + Redis + EMQX。
 
 ---

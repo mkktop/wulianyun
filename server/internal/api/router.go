@@ -25,6 +25,10 @@ func NewRouter() *gin.Engine {
 
 	v1 := r.Group("/api/v1")
 	{
+		// 健康检查探针（无需鉴权，供 Docker healthcheck / 部署脚本就绪探测）
+		v1.GET("/healthz", Healthz)
+		v1.GET("/readyz", Readyz)
+
 		// 公开接口
 		v1.POST("/auth/register", Register)
 		v1.POST("/auth/login", Login)

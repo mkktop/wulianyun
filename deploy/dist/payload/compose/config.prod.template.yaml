@@ -1,0 +1,71 @@
+# KK物联云 生产配置模板 —— 由 setup.sh 用 envsubst 渲染为 config.prod.yaml（gitignore）
+# 主机名使用 docker-compose 服务名（postgres / redis / emqx / server）
+
+server:
+  addr: ":8080"
+
+gateway:
+  addr: ":9100"
+  idle_timeout: 300
+  max_conns_per_ip: 10
+  conn_rate_limit: 5
+  conn_rate_burst: 10
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+
+jwt:
+  secret: "${JWT_SECRET}"
+  expire_hours: 72
+
+# 首次启动创建 admin 用户的密码（setup.sh 生成）
+admin_password: "${ADMIN_PASSWORD}"
+
+database:
+  dsn: "host=postgres user=iot password=${POSTGRES_PASSWORD} dbname=iot port=5432 sslmode=disable TimeZone=Asia/Shanghai"
+  max_open_conns: 50
+  max_idle_conns: 10
+  conn_max_lifetime: 1800
+  conn_max_idle_time: 600
+  retention_days: 30
+  compress_after_days: 7
+
+redis:
+  addr: "redis:6379"
+  password: "${REDIS_PASSWORD}"
+  db: 0
+  pool_size: 20
+  min_idle_conns: 5
+
+mqtt:
+  broker: "tcp://emqx:1883"
+  client_id: "iot-platform-internal"
+  username: "iot-platform-internal"
+  password: "${MQTT_INTERNAL_PASSWORD}"
+  tls:
+    enabled: false
+    ca_cert: ""
+    client_cert: ""
+    client_key: ""
+    insecure_skip_verify: false   # 生产硬化：不跳过证书校验
+
+telemetry_buffer:
+  max_batch: 100
+  flush_interval: 1
+
+cache:
+  device_ttl: 300
+  shadow_flush_interval: 5
+
+poller:
+  max_concurrent: 50
+
+log:
+  trace_retention_days: 7
+  device_log_retention_days: 30
+
+# EMQX 规则引擎快路径：默认关闭。启用前需先在 EMQX Dashboard 配置 PG Connector + Rule
+# 详见 server/deploy/emqx/rules/README.md
+emqx_rule:
+  enabled: false
