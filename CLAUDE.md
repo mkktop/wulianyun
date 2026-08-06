@@ -120,7 +120,12 @@ The repo's `server/Dockerfile` / `web/Dockerfile` are self-contained **multi-sta
 1. **Local prebuild** (on the dev box):
    ```powershell
    cd server; GOOS=linux GOARCH=amd64 CGO_ENABLED=0 .tools\go\bin\go.exe build -trimpath -ldflags="-s -w" -o ..\_kk\server-linux .\cmd\server
-   cd ..\web; npm run build   # → web/dist
+   cd ..\web; npm run build          # → web/dist
+   cd ..\docs; npm ci; npm run docs:build   # → docs/.vitepress/dist（VitePress 开发文档）
+   # 文档产物并入前端 dist，随 web/dist 一起上传；nginx 经 /developer/ 子路径提供（compose 已 bind-mount）
+   if (Test-Path ..\web\dist\developer) { Remove-Item -Recurse -Force ..\web\dist\developer }
+   Copy-Item -Recurse .vitepress\dist ..\web\dist\developer   # 先清后拷，避免重复运行时 developer/dist 套娃
+   cd ..\web
    ```
 2. **Thin Dockerfiles** (single stage): `FROM alpine:3.20` + `COPY server-linux /app/server` (+ `COPY configs`, `ca-certificates`, `tzdata`, non-root `app`); `FROM nginx:1.27-alpine` + `COPY dist` + `COPY nginx.conf`. The web one needs `web/.dockerignore` to **keep `dist/`** (the repo's excludes it for multi-stage).
 3. **Upload** via SFTP — but the server's SFTP (paramiko + OpenSSH 10.3) **rejects absolute remote paths** (ENOENT on open-for-write); use **relative paths** (SFTP CWD is `/root`), or tar + relative put + `tar xzf` over `/opt/wulianyun` (preserves `.env`/`config.prod.yaml`).

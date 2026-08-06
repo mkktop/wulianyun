@@ -129,7 +129,7 @@ func Overview(c *gin.Context) {
 		Scopes(ownedScope(c, "devices.user_id")).
 		Where("telemetries.ts >= ?", today.AddDate(0, 0, -6)).
 		Select("to_char(date_trunc('day', telemetries.ts), 'MM-DD') AS day, count(*) AS count").
-		Group("1").Order("1").Scan(&trend)
+		Group("day").Order("day").Scan(&trend)
 
 	// 设备在线率
 	onlineRate := 0.0

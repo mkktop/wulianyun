@@ -199,6 +199,6 @@ func AlarmTrend(c *gin.Context) {
 	repository.DB.Model(&model.Alarm{}).Scopes(ownedScope(c, "")).
 		Select("to_char(date_trunc('day', created_at), 'MM-DD') AS day, count(*) AS count").
 		Where("created_at >= ?", today.AddDate(0, 0, -6)).
-		Group("1").Order("1").Scan(&trend)
+		Group("day").Order("day").Scan(&trend)
 	OK(c, trend)
 }
