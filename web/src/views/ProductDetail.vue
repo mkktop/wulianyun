@@ -288,7 +288,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import * as echarts from 'echarts'
+import echarts from '../utils/echarts'
 import {
   api, type Product, type Device, type EventReport, type CommandLog,
   type ModbusPoint, type TslProperty, type TslEvent, type TslService,
@@ -564,7 +564,7 @@ async function loadGrants() {
 }
 async function openGrant() {
   grantSecondaryId.value = undefined
-  accounts.value = await api.listAccounts()
+  accounts.value = await api.listAccounts({ all: 1 })
   grantVisible.value = true
 }
 async function doGrant() {

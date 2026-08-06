@@ -42,6 +42,15 @@
         </template>
       </el-table-column>
     </el-table>
+    <div style="margin-top: 12px; display: flex; justify-content: flex-end">
+      <el-pagination
+        v-model:current-page="page"
+        :page-size="size"
+        :total="total"
+        layout="total, prev, pager, next"
+        @current-change="load"
+      />
+    </div>
   </el-card>
 
   <el-dialog v-model="dialogVisible" title="创建应用" width="420px">
@@ -65,6 +74,9 @@ import { fmtDateTime } from '../utils/format'
 
 const list = ref<OpenApp[]>([])
 const loading = ref(false)
+const page = ref(1)
+const total = ref(0)
+const size = 10
 const dialogVisible = ref(false)
 const saving = ref(false)
 const appName = ref('')
@@ -73,7 +85,9 @@ const secretShown = reactive<Record<number, boolean>>({})
 async function load() {
   loading.value = true
   try {
-    list.value = await api.listApps()
+    const res = await api.listApps({ page: page.value, size })
+    list.value = res.list
+    total.value = res.total
   } finally {
     loading.value = false
   }

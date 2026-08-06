@@ -40,9 +40,10 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
-import * as echarts from 'echarts'
+import echarts from '../utils/echarts'
 import { api, type Alarm } from '../api'
 import { realtime } from '../utils/realtime'
+import { debounce } from '../utils/debounce'
 
 const data = ref<any>({ productCount: 0, deviceCount: 0, onlineCount: 0, msgToday: 0, msgTrend: [], statusDist: [] })
 const alarms = ref<Alarm[]>([])
@@ -119,8 +120,10 @@ function shortTime(s: string) {
   return new Date(s).toLocaleTimeString('zh-CN', { hour12: false })
 }
 
+// alarm / device_status 合并刷新（debounce），避免 WS 风暴放大成请求风暴
+const debouncedLoad = debounce(load, 500)
 function onMsg(msg: any) {
-  if (msg.type === 'alarm' || msg.type === 'device_status') load()
+  if (msg.type === 'alarm' || msg.type === 'device_status') debouncedLoad()
 }
 
 const onResize = () => { trendChart.value?.resize(); pieChart.value?.resize() }

@@ -93,10 +93,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { ElMessage } from 'element-plus'
-import * as echarts from 'echarts'
+import echarts from '../utils/echarts'
 import { api, type Alarm } from '../api'
 import { fmtDateTime } from '../utils/format'
 import { realtime } from '../utils/realtime'
+import { debounce } from '../utils/debounce'
 
 const list = ref<Alarm[]>([])
 const total = ref(0)
@@ -173,9 +174,10 @@ function fmt(s: string | null) {
   return fmtDateTime(s)
 }
 
-// 新告警实时刷新列表
+// 新告警实时刷新列表（debounce：告警爆发时合并为一次拉取，避免请求风暴）
+const debouncedLoad = debounce(load, 400)
 function onMsg(msg: any) {
-  if (msg.type === 'alarm') load()
+  if (msg.type === 'alarm') debouncedLoad()
 }
 
 const onResize = () => { trendChart.value?.resize() }

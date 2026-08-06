@@ -39,9 +39,10 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
-import * as echarts from 'echarts'
+import echarts from '../utils/echarts'
 import { api } from '../api'
 import { realtime } from '../utils/realtime'
+import { debounce } from '../utils/debounce'
 
 const data = ref<any>({ productCount: 0, deviceCount: 0, onlineCount: 0, onlineRate: 0, msgToday: 0, msgTotal: 0, msgRateMin: 0, msgTrend: [], statusDist: [] })
 const chartRef = ref<HTMLElement>()
@@ -110,9 +111,10 @@ function renderPie() {
   })
 }
 
-// 设备状态变化时刷新统计
+// 设备状态变化时刷新统计（debounce：短时间内多条状态变更合并为一次拉取）
+const debouncedLoad = debounce(load, 400)
 function onMsg(msg: any) {
-  if (msg.type === 'device_status') load()
+  if (msg.type === 'device_status') debouncedLoad()
 }
 
 const onResize = () => { chart.value?.resize(); pie.value?.resize() }

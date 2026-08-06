@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { cancelAllPending } from '../utils/http-pending'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -31,6 +32,8 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
+  // 路由切换：取消所有进行中的请求，避免旧页面请求结果覆盖新页面数据
+  cancelAllPending()
   const token = localStorage.getItem('token')
   if (!token && to.path !== '/login') return '/login'
   if (token && to.path === '/login') return '/'

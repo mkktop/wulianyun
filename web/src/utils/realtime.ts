@@ -1,4 +1,4 @@
-// WebSocket 实时推送封装：自动重连 + 设备订阅
+// WebSocket 实时推送封装：自动重连 + 设备订阅 + requestAnimationFrame 批量派发
 type Handler = (msg: any) => void
 
 class RealtimeClient {
@@ -6,6 +6,10 @@ class RealtimeClient {
   private handlers = new Set<Handler>()
   private subscribed = new Set<number>()
   private timer: number | null = null
+  // 批量派发缓冲：同一帧内收到的多条消息合并到下一帧统一派发，
+  // 避免高频推送时同步遍历 handler 阻塞主线程、放大成请求风暴。
+  private pending: any[] = []
+  private rafId: number | null = null
 
   connect() {
     const token = localStorage.getItem('token')
@@ -18,8 +22,8 @@ class RealtimeClient {
     }
     this.ws.onmessage = (e) => {
       try {
-        const msg = JSON.parse(e.data)
-        this.handlers.forEach((h) => h(msg))
+        this.pending.push(JSON.parse(e.data))
+        this.scheduleFlush()
       } catch { /* ignore */ }
     }
     this.ws.onclose = () => {
@@ -30,8 +34,36 @@ class RealtimeClient {
     }
   }
 
+  // 下一帧统一派发：高频推送时一帧内只触发一轮 handler 遍历。
+  // device_status 按 deviceId 做 last-wins 合并（只关心最终在线态）；
+  // alarm / telemetry 等不合并，全部派发。
+  private scheduleFlush() {
+    if (this.rafId != null) return
+    this.rafId = requestAnimationFrame(() => {
+      this.rafId = null
+      const batch = this.pending
+      this.pending = []
+      const merged: any[] = []
+      const statusByDevice = new Map<number, any>()
+      for (const m of batch) {
+        if (m && m.type === 'device_status' && m.deviceId != null) {
+          statusByDevice.set(m.deviceId, m)
+        } else {
+          merged.push(m)
+        }
+      }
+      statusByDevice.forEach((m) => merged.push(m))
+      for (const h of this.handlers) {
+        for (const m of merged) h(m)
+      }
+    })
+  }
+
   close() {
     if (this.timer) window.clearTimeout(this.timer)
+    if (this.rafId != null) cancelAnimationFrame(this.rafId)
+    this.rafId = null
+    this.pending = []
     this.ws?.close()
     this.ws = null
     this.subscribed.clear()

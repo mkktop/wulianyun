@@ -1,17 +1,29 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '../router'
+import { pending, reqKey } from '../utils/http-pending'
 
 const http = axios.create({ baseURL: '/api/v1', timeout: 15000 })
 
 http.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
   if (token) config.headers.Authorization = `Bearer ${token}`
+  // GET 去重：相同请求 later-wins（取消前一个），
+  // 并挂 AbortController.signal，供路由切换时统一取消，消除快速切页竞态。
+  const method = (config.method || 'get').toLowerCase()
+  if (method === 'get') {
+    const key = reqKey(method, config.url, config.params)
+    pending.get(key)?.abort()
+    const ctrl = new AbortController()
+    pending.set(key, ctrl)
+    config.signal = ctrl.signal
+  }
   return config
 })
 
 http.interceptors.response.use(
   (resp) => {
+    if (resp.config) pending.delete(reqKey(resp.config.method || 'get', resp.config.url, resp.config.params))
     const { code, msg, data } = resp.data
     if (code !== 0) {
       ElMessage.error(msg || '请求失败')
@@ -20,6 +32,11 @@ http.interceptors.response.use(
     return data
   },
   (err) => {
+    if (err.config) pending.delete(reqKey(err.config.method || 'get', err.config.url, err.config.params))
+    // 主动取消（去重 / 路由切换）静默处理，不弹错误提示
+    if (axios.isCancel(err) || err.code === 'ERR_CANCELED') {
+      return Promise.reject(err)
+    }
     if (err.response?.status === 401) {
       localStorage.removeItem('token')
       router.push('/login')
@@ -265,7 +282,7 @@ export const api = {
     http.post('/auth/change-password', data) as Promise<void>,
   profile: () => http.get('/auth/profile') as Promise<any>,
 
-  listAccounts: () => http.get('/accounts') as Promise<Account[]>,
+  listAccounts: (params?: any) => http.get('/accounts', { params }) as Promise<any>,
   createAccount: (data: { username: string; password: string; nickname?: string }) =>
     http.post('/accounts', data) as Promise<Account>,
   updateAccount: (id: number, data: { nickname?: string; password?: string; status?: string }) =>
@@ -290,7 +307,8 @@ export const api = {
   createDevice: (data: any) => http.post('/devices', data) as Promise<Device>,
   updateDevice: (id: number, data: any) => http.put(`/devices/${id}`, data),
   deleteDevice: (id: number) => http.delete(`/devices/${id}`),
-  deviceEvents: (id: number | string) => http.get(`/devices/${id}/events`) as Promise<any[]>,
+  deviceEvents: (id: number | string, params?: any) =>
+    http.get(`/devices/${id}/events`, { params }) as Promise<Page<any>>,
   deviceLatest: (id: number | string) => http.get(`/devices/${id}/latest`) as Promise<any>,
   deviceHistory: (id: number | string, params?: any) =>
     http.get(`/devices/${id}/history`, { params }) as Promise<{ ts: number; data: Record<string, any> }[]>,
@@ -338,7 +356,7 @@ export const api = {
   testCodec: (productId: number | string, script: string, hexStr: string) =>
     http.post(`/products/${productId}/codec/test`, { script, hex: hexStr }) as Promise<any>,
 
-  listApps: () => http.get('/apps') as Promise<OpenApp[]>,
+  listApps: (params?: any) => http.get('/apps', { params }) as Promise<Page<OpenApp>>,
   createApp: (name: string) => http.post('/apps', { name }) as Promise<OpenApp>,
   updateApp: (id: number, data: any) => http.put(`/apps/${id}`, data),
   deleteApp: (id: number) => http.delete(`/apps/${id}`),

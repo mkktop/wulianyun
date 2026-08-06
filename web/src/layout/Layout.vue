@@ -111,6 +111,7 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElNotification, type FormInstance, type FormRules } from 'element-plus'
 import { realtime } from '../utils/realtime'
+import { debounce } from '../utils/debounce'
 import { api } from '../api'
 import Clock from '../components/Clock.vue'
 
@@ -134,17 +135,18 @@ const breadcrumbs = computed(() => {
   return crumbs
 })
 
-// 全局告警弹窗
+// 全局告警弹窗（debounce 限频：告警风暴时合并，避免堆叠一屏通知）
+const notifyAlarm = debounce((payload: any) => {
+  ElNotification({
+    title: `告警：${payload.ruleName}`,
+    message: payload.message,
+    type: payload.level === 'critical' ? 'error' : 'warning',
+    duration: 8000,
+    onClick: () => router.push('/alarms')
+  })
+}, 800)
 function onMsg(msg: any) {
-  if (msg.type === 'alarm') {
-    ElNotification({
-      title: `告警：${msg.payload.ruleName}`,
-      message: msg.payload.message,
-      type: msg.payload.level === 'critical' ? 'error' : 'warning',
-      duration: 8000,
-      onClick: () => router.push('/alarms')
-    })
-  }
+  if (msg.type === 'alarm') notifyAlarm(msg.payload)
 }
 
 const tier = ref(localStorage.getItem('tier') || 'primary')

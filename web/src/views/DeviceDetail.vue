@@ -224,7 +224,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import * as echarts from 'echarts'
+import echarts from '../utils/echarts'
 import { api, type Device, type TslProperty, type TslService, isViewOnly } from '../api'
 import { fmtDateTime } from '../utils/format'
 import { realtime } from '../utils/realtime'
@@ -342,7 +342,7 @@ async function load() {
     latest.value = l.data
     lastTs.value = l.ts
   }
-  events.value = await api.deviceEvents(id)
+  events.value = (await api.deviceEvents(id, { size: 50 })).list
   if (device.value?.productId) await loadThingModel(device.value.productId)
 }
 
@@ -409,6 +409,18 @@ function renderAll() {
   fields.value.forEach((f, i) => renderField(f, i))
 }
 
+// 高频 telemetry 时用 requestAnimationFrame 合批渲染：一帧内多条消息只触发一次 renderAll，
+// 避免逐条 setOption({notMerge:true}) 造成 ECharts 频繁重绘卡顿。
+let renderRaf = 0
+let alive = true
+function scheduleRender() {
+  if (renderRaf || !alive) return
+  renderRaf = requestAnimationFrame(() => {
+    renderRaf = 0
+    if (alive) renderAll()
+  })
+}
+
 async function send() {
   try {
     JSON.parse(command.value)
@@ -439,16 +451,15 @@ function onMsg(msg: any) {
       series.get(k)!.push([msg.payload.ts, v])
     }
     if (hasNew) {
-      syncFields().then(renderAll)
+      // 新字段需先同步图表容器，再在下一帧渲染
+      syncFields().then(() => scheduleRender())
     } else {
-      fields.value.forEach((f, i) => {
-        if (msg.payload.data[f] !== undefined) renderField(f, i)
-      })
+      scheduleRender()
     }
   }
   if (msg.type === 'device_status' && msg.deviceId === id && device.value) {
     device.value.status = msg.payload.status
-    api.deviceEvents(id).then((e) => (events.value = e))
+    api.deviceEvents(id, { size: 50 }).then((e: any) => (events.value = e.list))
   }
 }
 
@@ -529,6 +540,8 @@ onMounted(async () => {
   window.addEventListener('resize', onResize)
 })
 onUnmounted(() => {
+  alive = false
+  if (renderRaf) cancelAnimationFrame(renderRaf)
   realtime.unsubscribe(id)
   realtime.off(onMsg)
   window.removeEventListener('resize', onResize)
