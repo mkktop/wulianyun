@@ -13,18 +13,21 @@ P="${COMPOSE_PROJECT_NAME:-kk-iot}"
 CF="compose/docker-compose.yml"
 TS="$(date +%Y%m%d-%H%M%S)"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
+# 用包内自带的 server 镜像（alpine 底）操作卷，离线可用，不额外拉镜像
+SRVIMG="kk-iot/server:${VER}-${ARCH}"
+VOLRUN() { docker run --rm --entrypoint '' --user 0 "$@"; }
 
 echo "▶ 备份数据库（pg_dump 在线，自定义格式）..."
 docker compose -p "$P" -f "$CF" exec -T postgres pg_dump -U iot -Fc iot > "$WORK/db.dump"
 
 echo "▶ 备份 uploads 卷 ..."
-docker run --rm -v "${P}_uploads":/data -v "$WORK":/backup alpine \
+VOLRUN -v "${P}_uploads":/data -v "$WORK":/backup "$SRVIMG" \
   tar czf /backup/uploads.tar.gz -C /data .
 
 echo "▶ 备份 redis 快照（缓存，非致命）..."
 if docker compose -p "$P" -f "$CF" exec -T redis \
   sh -c 'redis-cli -a "$REDIS_PASSWORD" --rdb /data/dump-backup.rdb' >/dev/null 2>&1; then
-  docker run --rm -v "${P}_redis-data":/data -v "$WORK":/backup alpine \
+  VOLRUN -v "${P}_redis-data":/data -v "$WORK":/backup "$SRVIMG" \
     cp /data/dump-backup.rdb /backup/redis.rdb 2>/dev/null || true
 else
   echo "  ⚠️  redis 快照失败（缓存可从 DB 重建，非致命）"

@@ -101,7 +101,8 @@ else
   done
   printf '%s\n' "$content" > compose/config.prod.yaml
 fi
-chmod 600 compose/config.prod.yaml
+# 注意：server 容器以 uid 10001 (app) 运行，必须 644 否则读取 permission denied
+chmod 644 compose/config.prod.yaml
 grep -q '\${' compose/config.prod.yaml && { echo "❌ config.prod.yaml 仍有未替换占位符，检查 .env"; exit 1; }
 echo "✅ 配置已渲染"
 
