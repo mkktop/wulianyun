@@ -78,15 +78,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VER="$(tr -d '[:space:]' < VERSION)"
+          # 详细使用说明来自 deploy/dist/RELEASE_NOTES.md（替换 @VERSION@ 占位符）
+          sed "s|@VERSION@|${VER}|g" deploy/dist/RELEASE_NOTES.md > /tmp/release-notes.md
           gh release create "${GITHUB_REF#refs/tags/}" \
             --title "KK物联云 v${VER}" \
-            --notes "私有化离线交付包 v${VER}。
-
-          下载对应架构的 \`kk-iot-*.tar.gz\`，在目标 Linux 机器执行：
-          \`\`\`bash
-          tar xzf kk-iot-*.tar.gz
-          cd kk-iot-*
-          bash install.sh
-          \`\`\`
-          详见包内 README.md。" \
+            --notes-file /tmp/release-notes.md \
             deploy/dist/kk-iot-*.tar.gz*
