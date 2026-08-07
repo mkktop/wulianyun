@@ -43,11 +43,14 @@ echo "======================================================"
 # 1) 前端 + 开发文档（架构无关，只构建一次）
 # ============================================================================
 echo "▶ [1/2] 前端 + 开发文档 ..."
+# 顺序：先 web build 生成 web/dist，再并入 docs 产物。
+# （若反过来，CI 干净 checkout 无 web/dist（gitignored）会 cp 失败；且 vite 构建会清空 dist）
+( cd "$WEB" && npm ci && npm run build )
 ( cd "$DOCS" && npm ci && npm run docs:build )
-# VitePress 产物并入 web/dist/developer（base=/developer/）
+mkdir -p "$WEB/dist"
 rm -rf "$WEB/dist/developer"
 cp -r "$DOCS/.vitepress/dist" "$WEB/dist/developer"
-( cd "$WEB" && npm ci && npm run build )
+echo "✅ 前端产物就绪"
 
 # 暂存 web 构建上下文（绕开 web/.dockerignore 对 dist/ 的排除 —— 不动 web/ 目录）
 WEB_CTX="$BUILD/web"
