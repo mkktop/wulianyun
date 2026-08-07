@@ -5,8 +5,10 @@ FROM alpine:3.20
 # ca-certificates：规则引擎 webhook 可配 https 出站；tzdata：保守保留（当前代码不依赖）
 RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 10001 app
 WORKDIR /app
-COPY server /app/server            # 预编译二进制（CGO_ENABLED=0 静态）
-COPY configs /app/configs          # 默认配置；compose 挂载 config.prod.yaml 覆盖
+# 预编译二进制（CGO_ENABLED=0 静态）
+COPY server /app/server
+# 默认配置；compose 挂载 config.prod.yaml 覆盖
+COPY configs /app/configs
 # uploads/firmware 必须预存在且属主为 app：named volume 首次挂载会复制此目录的属主，
 # 否则固件上传（ota.go 以 uid 10001 写 uploads/firmware）会 EPERM
 RUN mkdir -p /app/uploads/firmware && chown -R app:app /app
