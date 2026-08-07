@@ -53,7 +53,7 @@
       <el-table-column label="最后上线" width="160">
         <template #default="{ row }">{{ fmt(row.lastOnlineAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right">
+      <el-table-column label="操作" width="180" fixed="right" class-name="col-ops">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="$router.push(`/devices/${row.id}`)">详情</el-button>
           <el-button v-if="!viewOnly" link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
@@ -347,4 +347,9 @@ onUnmounted(() => realtime.off(onMsg))
 .tag-edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .group-add { display: flex; gap: 8px; margin-bottom: 12px; }
 .muted { color: #c0c4cc; }
+:deep(.col-ops .cell) {
+  white-space: nowrap;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+}
+:deep(.col-ops .cell .el-button) { margin: 0; }
 </style>

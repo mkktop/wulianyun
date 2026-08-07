@@ -25,9 +25,9 @@ body {
 /* ---- 表格空状态美化 ---- */
 .el-table__empty-text { color: #909399; font-size: 13px; line-height: 60px; }
 
-/* ---- 路由切换动画 ---- */
-.page-fade-enter-active { transition: opacity .25s ease, transform .25s ease; }
+/* ---- 路由切换动画（纯淡入淡出，避免位移/跳高造成的“弹一下”） ---- */
+.page-fade-enter-active { transition: opacity .2s ease; }
 .page-fade-leave-active { transition: opacity .12s ease; }
-.page-fade-enter-from { opacity: 0; transform: translateY(6px); }
+.page-fade-enter-from { opacity: 0; }
 .page-fade-leave-to { opacity: 0; }
 </style>

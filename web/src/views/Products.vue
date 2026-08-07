@@ -41,7 +41,7 @@
       <el-table-column label="创建时间" width="120">
         <template #default="{ row }">{{ fmtDate(row.createdAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="130" fixed="right">
+      <el-table-column label="操作" width="140" fixed="right" class-name="col-ops">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="$router.push(`/products/${row.id}`)">详情</el-button>
           <el-dropdown trigger="click" @command="(c: string) => onCmd(c, row)">
@@ -128,4 +128,9 @@ onMounted(load)
 <style scoped>
 .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; }
 .pager { margin-top: 16px; justify-content: flex-end; }
+:deep(.col-ops .cell) {
+  white-space: nowrap;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+}
+:deep(.col-ops .cell .el-button) { margin: 0; }
 </style>
