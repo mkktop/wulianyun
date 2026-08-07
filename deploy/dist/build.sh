@@ -98,7 +98,8 @@ for ARCH in "${ARCHES[@]}"; do
   cp "$DIST_DIR/payload"/install.sh "$DIST_DIR/payload"/upgrade.sh \
      "$DIST_DIR/payload"/backup.sh "$DIST_DIR/payload"/restore.sh \
      "$DIST_DIR/payload"/diag.sh "$PKG/"
-  cp "$DIST_DIR/payload/README.md" "$PKG/"
+  # 包内 README = RELEASE_NOTES.md 渲染（单一来源；@VERSION@ → 实际版本）
+  sed "s|@VERSION@|${VERSION}|g" "$DIST_DIR/RELEASE_NOTES.md" > "$PKG/README.md"
   echo "$VERSION" > "$PKG/VERSION"   # install.sh 据此写 .env 的 VER
   cp "$DIST_DIR/payload/compose/docker-compose.yml"      "$PKG/compose/"
   cp "$DIST_DIR/payload/compose/config.prod.template.yaml" "$PKG/compose/"

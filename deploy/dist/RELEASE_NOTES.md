@@ -18,10 +18,24 @@ sha256sum -c kk-iot-@VERSION@-amd64.tar.gz.sha256   # 输出 OK 表示完整
 
 ## 系统要求
 
-- 操作系统：Linux（amd64 或 arm64）
-- 已安装 **Docker** + **docker compose v2**（install.sh 会检测；完全离线机需提前备好离线 Docker 安装包）
-- 内存 ≥1.5GB（推荐 ≥2GB）、磁盘剩余 ≥10GB
-- 目标端口：80(Web) / 1883(MQTT) / 9100(DTU-TCP) / 8083(MQTT-WS)，占用会警告
+| 项 | 要求 |
+|---|---|
+| 操作系统 | Linux x86_64 / arm64 |
+| 内存 | ≥2GB（1.5GB 可跑但推荐更高） |
+| 磁盘 | ≥10GB 可用 |
+| 软件 | Docker（含 compose v2 插件）；未装需先联网 `curl -fsSL https://get.docker.com \| sh` |
+| 端口 | 80 / 1883 / 9100 / 8083 可用（8080/5432/6379 仅内部） |
+
+**端口表**
+
+| 端口 | 用途 | 公网 |
+|---|---|---|
+| 80 | 管理后台（nginx） | 是 |
+| 1883 | MQTT 设备接入 | 是 |
+| 9100 | DTU/TCP 设备接入 | 是 |
+| 8083 | MQTT over WebSocket（可选） | 是 |
+| 18083 | EMQX 面板 | 仅本机 |
+| 8080 / 5432 / 6379 | 后端 / 数据库 / Redis | 仅内部 |
 
 ## 安装
 
@@ -46,6 +60,13 @@ bash install.sh
 EMQX 面板: 18083 仅本机（经 SSH 隧道访问）
 ```
 
+EMQX 面板经 SSH 隧道访问：
+
+```bash
+ssh -L 18083:127.0.0.1:18083 root@<服务器IP>
+# 浏览器打开 http://127.0.0.1:18083 ，账号 admin / 安装时打印的 EMQX 密码
+```
+
 > **重装注意**：`bash install.sh --force` 会重新生成密钥，旧数据将无法连接——重装前务必先备份。
 
 ## 首次验证
@@ -64,8 +85,9 @@ EMQX 面板: 18083 仅本机（经 SSH 隧道访问）
 | 恢复 | `bash restore.sh <备份包>` |
 | 升级 | `bash upgrade.sh <新版本包目录>` |
 | 诊断包（脱敏日志+配置） | `bash diag.sh` |
-| 查看日志 | `docker compose -p kk-iot logs -f server` |
-| 修改配置 | 编辑 `compose/config.prod.yaml` 后 `docker compose -p kk-iot -f compose/docker-compose.yml up -d` |
+| 重启 | `docker compose -p kk-iot -f compose/docker-compose.yml restart` |
+| 查看日志 | `docker compose -p kk-iot -f compose/docker-compose.yml logs -f server` |
+| 修改配置 | 编辑 `compose/config.prod.yaml` → 上面的 restart 命令 |
 
 ## 升级
 
@@ -77,14 +99,36 @@ bash upgrade.sh <新版本包目录>
 - 只替换 server/web 镜像并切换版本号，**postgres / redis / emqx / uploads 数据卷不动**
 - 升级前先 `bash backup.sh`
 - 升级失败回滚：`sed -i 's/^VER=.*/VER=<旧版本>/' .env && docker compose -p kk-iot -f compose/docker-compose.yml up -d`
+- 数据库迁移向前兼容（GORM AutoMigrate），降级旧版本一般安全；但若新版本含破坏性表结构变更，降级前务必先备份
+
+## 内存调优
+
+compose 内置适配弱机的内存上限（postgres 512m / emqx 384m / server 256m / redis 128m / web 48m，合计约 1.5GB）。
+若服务器内存充裕（≥4GB），可放大限制：编辑 `compose/docker-compose.yml` 各服务的 `deploy.resources.limits.memory`，再 `docker compose -p kk-iot -f compose/docker-compose.yml up -d`。
+
+## EMQX 面板密码
+
+面板密码**仅在首次安装时**写入（`emqx-data` 卷为空时生效），之后改 `.env` 的 `EMQX_DASHBOARD_PASSWORD` 不会生效。重置步骤：
+
+```bash
+docker compose -p kk-iot -f compose/docker-compose.yml stop emqx
+docker volume rm kk-iot_emqx-data        # 丢弃 EMQX 运行状态，不影响设备业务数据
+# 编辑 .env 的 EMQX_DASHBOARD_PASSWORD
+docker compose -p kk-iot -f compose/docker-compose.yml up -d
+```
 
 ## 迁移（换服务器）
 
 新机器安装同版本 → `bash restore.sh <旧服务器备份包>` → 数据库、固件上传、配置完整迁移。
+
+## 排障
+
+1. `bash diag.sh` 打包诊断信息（已脱敏），发给技术支持
+2. 查后端日志：`docker compose -p kk-iot -f compose/docker-compose.yml logs --tail=200 server`
+3. 重启全部：`docker compose -p kk-iot -f compose/docker-compose.yml restart`
 
 ## 注意事项
 
 - 交付包离线自包含：客户机全程不访问公网，无外网依赖
 - `.env` / `compose/config.prod.yaml` 含密钥（600 权限），请妥善保管、勿外传
 - `diag.sh` 产物已脱敏，可放心发给技术支持排障
-- EMQX 面板密码仅首次引导设置；修改需删除 `emqx-data` 卷重建（先备份）
