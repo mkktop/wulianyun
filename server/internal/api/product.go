@@ -86,6 +86,13 @@ func CreateProduct(c *gin.Context) {
 	if p.FrameMode == "" {
 		p.FrameMode = model.FrameModeNone
 	}
+	// 产品名称在同一拥有者名下唯一（区分大小写）
+	var dup int64
+	repository.DB.Model(&model.Product{}).Where("user_id = ? AND name = ?", p.UserID, p.Name).Count(&dup)
+	if dup > 0 {
+		Fail(c, 400, "产品名称已存在，请更换")
+		return
+	}
 	// 一型一密：生成产品级密钥
 	if req.SecretMode == model.SecretModeProduct {
 		p.ProductSecret = randHex(16)
@@ -156,6 +163,17 @@ func UpdateProduct(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, 400, "参数错误")
 		return
+	}
+	// 改名时校验同一拥有者名下名称唯一（排除自身）
+	if req.Name != p.Name {
+		var dup int64
+		repository.DB.Model(&model.Product{}).
+			Where("user_id = ? AND name = ? AND id <> ?", p.UserID, req.Name, p.ID).
+			Count(&dup)
+		if dup > 0 {
+			Fail(c, 400, "产品名称已存在，请更换")
+			return
+		}
 	}
 	// 接入方式/协议/密钥模式创建后不可变；允许改名称/描述/采集周期/组帧与心跳配置
 	updates := map[string]interface{}{"name": req.Name, "description": req.Description}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 
 	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
@@ -31,15 +32,27 @@ func SetDeviceProperty(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Params   map[string]interface{} `json:"params"`
-		ExpireSec int                   `json:"expireSec"` // 过期秒数（0=不过期）
+		Params    map[string]interface{} `json:"params"`
+		ExpireSec int                    `json:"expireSec"` // 过期秒数（0=不过期）
 	}
-	if err := c.ShouldBindJSON(&body); err != nil || len(body.Params) == 0 {
-		// 兼容旧格式：直接传 params
-		if err := c.ShouldBindJSON(&body.Params); err != nil || len(body.Params) == 0 {
+	// 用 ShouldBindBodyWith 缓存 body，避免二次读取已消费的流。
+	// 支持两种请求格式：
+	//   1) { "params": {...}, "expireSec": n }  —— 带过期时间的标准格式
+	//   2) { "propKey": value, ... }            —— 裸属性对象（前端 setProperty 使用）
+	if err := c.ShouldBindBodyWith(&body, binding.JSON); err != nil || len(body.Params) == 0 {
+		// params 为空，说明不是格式 1；尝试把整个 body 当作属性对象（格式 2）
+		var raw map[string]interface{}
+		if err := c.ShouldBindBodyWith(&raw, binding.JSON); err != nil || len(raw) == 0 {
 			Fail(c, 400, "属性参数必须是非空 JSON 对象")
 			return
 		}
+		// 排除误把 expireSec 等顶层字段当作属性
+		delete(raw, "expireSec")
+		if len(raw) == 0 {
+			Fail(c, 400, "属性参数必须是非空 JSON 对象")
+			return
+		}
+		body.Params = raw
 	}
 
 	messageID := fmt.Sprintf("%d", time.Now().UnixNano())
