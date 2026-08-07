@@ -104,13 +104,42 @@ The platform runs horizontally; several subsystems use Redis and degrade to sing
 - **Graceful shutdown**: `main.go` traps SIGINT/SIGTERM, tears down perf components in reverse order (shadow cache → telemetry buffer flush), then `srv.Shutdown(5s)`.
 - `server/server.exe`, `server/bin/`, `web/dist/`, `.tools/`, and `node_modules/` are build artifacts / vendored tooling — gitignored, do not edit.
 
+## 离线交付包 (deploy/dist/)
+
+商业化路径 = **私有化交付 (on-prem)**。`deploy/dist/` 是标准化**离线自包含交付包**——构建机产镜像、客户机 `docker load` + `docker compose up -d`，**绝不在客户机构建**（弱机/离线友好）。CI 打 `v*` tag 自动构建发 Release。这是商业化的交付门槛，应用层基本不动代码。
+
+**构建 `deploy/dist/build.sh`（需 Docker + Go ≥1.25 + Node）：**
+
+```bash
+cd deploy/dist && bash build.sh amd64     # 产 kk-iot-<VERSION>-amd64.tar.gz + .sha256
+```
+
+build.sh 流程：go 交叉编译 server（`CGO_ENABLED=0`）→ web/docs `npm build`（docs 产物并入 web/dist/developer）→ 薄单阶段 `Dockerfile.server`/`Dockerfile.web` 打 `kk-iot/server`、`kk-iot/web` → 连同 `timescale/timescaledb:2.17.2-pg16` / `redis:7-alpine` / `emqx/emqx:5.8`（**固定 tag，不用 latest**）`docker save` → tar.gz + sha256。Go 多源探测：`$GO` → `.tools/go` → `go`；arm64 走 QEMU（本期只实测 amd64）。
+
+**版本与发布：** 仓库根 `VERSION`（纯 semver，当前 `1.0.4`）是唯一版本源——build.sh 读取、CI 校验 tag==VERSION（不一致 CI fail）。`git tag v<VERSION>` 推送 → [`.github/workflows/build-release.yml`](.github/workflows/build-release.yml) 构建并 `gh release create`，Release 说明由 `RELEASE_NOTES.md`（`@VERSION@` 占位符）渲染（也作为包内 README 单一来源）。客户从 Releases 下载 tar.gz + sha256。
+
+**客户侧脚本（`deploy/dist/payload/`，打进交付包）：**
+
+- `install.sh`：root 预检（OS/架构/资源/端口）→ `docker load images/*.tar` → 生成 6 个密钥写 `.env`（幂等，`--force` 重生）→ envsubst 渲染 `compose/config.prod.yaml`（缺 gettext 走纯 bash 回退）→ `compose up -d` → 轮询 `/readyz`
+- `upgrade.sh <新包目录>`：load 新镜像 + 切 `.env` 的 `VER`（留 `.env.bak-<旧版>`）+ compose 优雅重建 server/web（**pg/redis/emqx 数据卷不动**）→ 轮询 readyz → 打印回滚命令。**注意从旧包目录运行、传新包目录**
+- `backup.sh` / `restore.sh <备份包>`：`pg_dump -Fc`（在线，不中断）+ uploads 卷 tar + redis RDB（非致命）+ config/.env → `backup-<VER>-<ts>.tar.gz` + sha256。卷操作用**包内自带的 `kk-iot/server` 镜像**（alpine 底，`--entrypoint '' --user 0` 跑 busybox tar/cp），离线不拉 alpine
+- `diag.sh`：收集 compose ps / logs / stats / 配置（**脱敏** password/secret）/ images → tar.gz
+
+**交付包关键约定（踩过的坑）：**
+
+- compose 顶层 `name: kk-iot`（+ `.env` 的 `COMPOSE_PROJECT_NAME`）固定卷名 `kk-iot_pgdata` 等——换解压目录不影响，否则会"空库附挂=数据丢失"假象
+- **server 容器 uid 10001**：bind-mount 的 `config.prod.yaml` 必须 `644`（`install.sh`/`restore.sh` 已做；`600` → `permission denied` 崩溃循环）。`Dockerfile.server` 必须 `mkdir -p /app/uploads/firmware && chown -R app:app /app`，否则 named volume 首次复制继承 root → OTA 固件上传 EPERM
+- 探针 `server/internal/api/health.go`：`/api/v1/healthz`（存活，无依赖，compose healthcheck 用）+ `/readyz`（DB ping，install/upgrade 轮询用）——拆双端点避免 DB 抖动触发重启
+- EMQX 的 `emqx ctl status` 超时 / compose `unhealthy` 标签是**假阴性**（dist 协议 ping）；EMQX 实际正常，看设备 auth 回调 200 + server 内部 MQTT 客户端连接 `mqtt connected`
+- 第二期未做（位置已标记）：版本化 migration（替裸 AutoMigrate）、ldflags 版本注入、license 授权、捆绑 Docker 离线安装、arm64 实测
+
 ## Test Deployment (Aliyun ECS)
 
 The platform is deployed on an Aliyun ECS used as the **ongoing test server**:
 
 - **Host**: 阿里云 ECS 测试机（2 核 / 1.6 GB RAM / Ubuntu 26.04，已装 Docker 29 + Compose v5）。**公网 IP / 内网 IP / SSH 密码均不写入仓库**——见本地 `memory/prod-deployment.md` 或询问用户。
-- **SSH**: `root@<test-server>`；密码见本地 gitignored `.claude/` 或 `memory/prod-deployment.md`。本机无 `sshpass`，用 `paramiko`（Python）驱动，而非 shell `ssh`。
-- **On server**: code at `/opt/wulianyun`; generated secrets at `/opt/wulianyun/deploy/prod/.env` (run `bash setup.sh` to generate, `--force` to regenerate). Stack runs via `docker compose` from `/opt/wulianyun/deploy/prod`.
+- **SSH**: `root@<test-server>`；密码见本地 gitignored `.claude/` 或 `memory/prod-deployment.md`。本机无 `sshpass`，用 `paramiko`（Python）驱动，而非 shell `ssh`（连接慢，需 `banner_timeout=30`）。
+- **On server**: 测试机**现跑离线交付包**（当前 v1.0.4），装在 `/root/pkg/kk-iot-<VER>-amd64/`——`docker compose -p kk-iot -f compose/docker-compose.yml`（容器 `iot-*`，项目名 `kk-iot`，密钥在该目录 `.env`）。用 `upgrade.sh` 升级、`backup.sh` 备份。遗留在线开发路径仍在 `/opt/wulianyun/deploy/prod`（`setup.sh` 生成 `.env`），但已被交付包取代。
 - **Public access**: web `:80`、MQTT `:1883`、DTU/TCP `:9100`——三者在阿里云安全组均放行。EMQX dashboard `:18083` 仅绑 `127.0.0.1`（经 SSH 隧道访问）。`8080/5432/6379` 仅内部。
 
 ### ⚠️ Thin-image deploy (this server can NOT run the repo's multi-stage build)
@@ -141,6 +170,7 @@ The repo's `server/Dockerfile` / `web/Dockerfile` are self-contained **multi-sta
 
 ### Redeploy checklist
 
-- **Code change** → local prebuild (Go binary / Vue dist) → upload → `docker compose up -d --build server` (or `web`). Don't run the multi-stage build on this server.
-- **Config change** → edit `/opt/wulianyun/deploy/prod/config.prod.yaml` → `docker compose restart server`.
-- **Logs/status**: `docker compose logs -f server`, `docker compose ps`. `iot-emqx` will show `unhealthy` — ignore (see above); check real MQTT health by publishing as a test device.
+- **代码变更（交付包路径，当前推荐）** → 本地 `bash deploy/dist/build.sh amd64` 出新包（或 CI 打 `v*` tag 出 Release）→ 传服务器 → `cd /root/pkg/kk-iot-<旧VER>-amd64 && bash upgrade.sh /root/pkg/kk-iot-<新VER>-amd64`（数据卷不动）。
+- **配置变更** → 编辑 `/root/pkg/kk-iot-<VER>-amd64/compose/config.prod.yaml`（**保持 644**）→ `docker compose -p kk-iot -f compose/docker-compose.yml restart server`。
+- **遗留手动路径**（仅在线开发/staging）：本地 prebuild Go/Vue → 上传 → `/opt/wulianyun/deploy/prod` 下 `docker compose up -d --build server`。**勿在此 1.6G 服务器跑多阶段构建**。
+- **日志/状态**：`docker compose -p kk-iot -f compose/docker-compose.yml logs -f server` / `ps`。`iot-emqx` 显示 `unhealthy`——忽略（见上）；真实 MQTT 健康看设备 auth 回调 200 + `mqtt connected`。
