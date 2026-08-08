@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -114,21 +113,13 @@ func FindDeviceByRegCode(regCode string) (*model.Device, error) {
 }
 
 // ParseClientID clientid 约定为 {productId}.{deviceName}
-// 产品ID 固定 12 字符（2 位字母 + 10 位数字），按字符数解析（设备名可含点号）；
-// 兼容旧格式（pk+16hex 共 18 字符）：按新格式解析失败后回退按点号拆分
+// 产品ID 固定 12 字符（2 位字母 + 10 位数字），按字符数解析（设备名可含点号）
 func ParseClientID(clientID string) (productKey, deviceName string, ok bool) {
-	// 新格式：前 12 字符为产品ID，第 13 字符为分隔点号
+	// 前 12 字符为产品ID，第 13 字符为分隔点号
 	if len(clientID) > 13 && isNewProductID(clientID[:12]) && clientID[12] == '.' {
 		dn := clientID[13:]
 		if dn != "" {
 			return clientID[:12], dn, true
-		}
-	}
-	// 旧格式兼容：{pk+16hex}.{deviceName}
-	if len(clientID) > 19 && strings.HasPrefix(clientID, "pk") && clientID[18] == '.' {
-		dn := clientID[19:]
-		if dn != "" {
-			return clientID[:18], dn, true
 		}
 	}
 	return "", "", false
