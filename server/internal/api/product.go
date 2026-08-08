@@ -16,6 +16,21 @@ func randHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
+// genProductKey 生成产品标识：2 位随机大写字母 + 10 位随机数字（如 AB1234567890）
+func genProductKey() string {
+	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	const digits = "0123456789"
+	b := make([]byte, 12)
+	rand.Read(b)
+	for i := 0; i < 2; i++ {
+		b[i] = letters[int(b[i])%len(letters)]
+	}
+	for i := 2; i < 12; i++ {
+		b[i] = digits[int(b[i])%len(digits)]
+	}
+	return string(b)
+}
+
 type productReq struct {
 	Name         string `json:"name" binding:"required,max=64"`
 	Protocol     string `json:"protocol" binding:"omitempty,oneof=mqtt tcp http"`
@@ -76,7 +91,7 @@ func CreateProduct(c *gin.Context) {
 		req.Protocol = "mqtt"
 	}
 	p := model.Product{
-		UserID: UID(c), Name: req.Name, ProductKey: "pk" + randHex(8),
+		UserID: UID(c), Name: req.Name, ProductKey: genProductKey(),
 		Protocol: req.Protocol, DataFormat: req.DataFormat, Description: req.Description,
 		AccessMode: req.AccessMode, SecretMode: req.SecretMode, PollInterval: req.PollInterval,
 		FrameMode: req.FrameMode, FrameDelimiter: req.FrameDelimiter,
