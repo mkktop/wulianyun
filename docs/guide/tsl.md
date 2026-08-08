@@ -120,7 +120,7 @@
 |---|---|---|
 | GET | `/api/v1/products/:id/thing-model` | 获取物模型 |
 | PUT | `/api/v1/products/:id/thing-model` | 保存物模型（整体覆盖） |
-| GET | `/api/v1/products/:id/tsl/export` | 导出（含 productKey/productName） |
+| GET | `/api/v1/products/:id/tsl/export` | 导出（含 productId/productName） |
 | POST | `/api/v1/products/:id/tsl/import` | 导入 |
 
 ## 七、完整示例

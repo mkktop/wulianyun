@@ -9,7 +9,7 @@ type MessageTrace struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
 	TraceID    string    `gorm:"size:36;uniqueIndex;not null" json:"traceId"`
 	UserID     uint      `gorm:"index;not null" json:"userId"`
-	ProductKey string    `gorm:"size:32" json:"productKey"`
+	ProductKey string    `gorm:"size:32" json:"productId"`
 	DeviceName string    `gorm:"size:64" json:"deviceName"`
 	DeviceID   uint      `gorm:"index" json:"deviceId"`
 	Direction  string    `gorm:"size:8" json:"direction"`

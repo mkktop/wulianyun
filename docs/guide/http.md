@@ -12,7 +12,7 @@ POST /api/v1/http/telemetry
 
 | 项 | 值 |
 |---|---|
-| Header | `X-Device-Token: Base64(productKey:deviceName:secret)` |
+| Header | `X-Device-Token: Base64(productId:deviceName:secret)` |
 | Body | 遥测 JSON（属性名→值，或 `method` 分流报文） |
 | Content-Type | `application/json` |
 
@@ -33,7 +33,7 @@ Content-Type: application/json
 
 ## 二、鉴权逻辑
 
-1. 取 `X-Device-Token` 头 → Base64 解码 → 按 `:` 拆分为恰好 3 段：`productKey / deviceName / secret`
+1. 取 `X-Device-Token` 头 → Base64 解码 → 按 `:` 拆分为恰好 3 段：`productId / deviceName / secret`
 2. 调用 `FindDeviceForAuth` 校验（兼容一机一密 / 一型一密）：
    - 一机一密：仅接受设备独立 Secret
    - 一型一密：接受设备 Secret 或产品 `ProductSecret`；设备不存在且密钥匹配 `ProductSecret` 时**自动注册**新设备
@@ -89,7 +89,7 @@ HTTP 上报端点**当前无速率限制**（仅有 TCP 网关限流）。生产
 POST /api/v1/auth/token
 Content-Type: application/json
 
-{ "productKey": "pk123", "deviceName": "dev1", "secret": "secret123" }
+{ "productId": "pk123", "deviceName": "dev1", "secret": "secret123" }
 ```
 
 ```json

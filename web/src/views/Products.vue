@@ -20,8 +20,8 @@
       </el-table-column>
       <el-table-column label="ProductKey" min-width="200">
         <template #default="{ row }">
-          <el-text type="info">{{ row.productKey }}</el-text>
-          <el-button link type="primary" size="small" @click="copy(row.productKey)">复制</el-button>
+          <el-text type="info">{{ row.productId }}</el-text>
+          <el-button link type="primary" size="small" @click="copy(row.productId)">复制</el-button>
         </template>
       </el-table-column>
       <el-table-column label="接入方式" width="110">

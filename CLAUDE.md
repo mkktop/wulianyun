@@ -39,7 +39,7 @@ cd server; go build -o bin\server.exe .\cmd\server
 $env:GOOS="linux"; go build -o bin\server-linux .\cmd\server  # cross-compile
 
 # Device simulator
-cd tools\simulator; node simulator.js <productKey> <deviceName> <deviceSecret> [broker]
+cd tools\simulator; node simulator.js <productId> <deviceName> <deviceSecret> [broker]
 ```
 
 Default ports: HTTP `:8080` · TCP gateway `:9100` · MQTT `1883` (EMQX dashboard `18083`, admin/public) · Postgres `5432` · Redis `6379` · frontend `5173`. Docker uses `network_mode: host` so Windows/WSL localhost reaches the containers directly.
@@ -97,7 +97,7 @@ The platform runs horizontally; several subsystems use Redis and degrade to sing
 ## Key Conventions
 
 - **API envelope**: every JSON response is `{code, msg, data}` where `code === 0` means success. The frontend axios interceptor (`web/src/api/index.ts`) unwraps `data` and surfaces non-zero `msg` via `ElMessage`; `401` clears the token and redirects to `/login`.
-- **MQTT client convention**: `clientid = {productKey}.{deviceName}` (parsed by `service.ParseClientID`), `username = {deviceName}`, `password = device secret` **or** a `tk:` dynamic token. Topics: `thing/up|down|broadcast|offline/{pk}/{dn}`, plus `thing/gateway/{pk}/{dn}/sub/...` for sub-devices. See `mqtt/client.go` constants.
+- **MQTT client convention**: `clientid = {productId}.{deviceName}` (parsed by `service.ParseClientID`), `username = {deviceName}`, `password = device secret` **or** a `tk:` dynamic token. Topics: `thing/up|down|broadcast|offline/{pk}/{dn}`, plus `thing/gateway/{pk}/{dn}/sub/...` for sub-devices. See `mqtt/client.go` constants.
 - **Secret modes**: `device` (一机一密, per-device secret) vs `product` (一型一密, shared `ProductSecret` that auto-registers unknown devices — `FindDeviceForAuth`).
 - **Auth layers** (all in `internal/api`): `JWTAuth` (web/admin, JWT in `Authorization: Bearer` or `?token=` for WS), `OpenAPIAuth` (HMAC-SHA256 signing on `/openapi/v1`, `±5 min` timestamp window), and EMQX callbacks `EmqxAuth`/`EmqxACL`. OpenAPI calls reuse the same handlers as the admin API, scoped to the app owner's `uid`.
 - **Frontend**: single axios client at `/api/v1`; WebSocket at `/api/v1/ws` — send `{type:"subscribe",deviceId}` to filter telemetry to subscribed devices. `/screen` (BigScreen) is outside the auth-protected layout. Routes are lazy-loaded in `web/src/router/index.ts`.

@@ -137,17 +137,17 @@ npm run dev
 
 ### 4. 模拟设备
 
-在平台创建产品和设备，拿到三元组（ProductKey / DeviceName / DeviceSecret），运行模拟器：
+在平台创建产品和设备，拿到三元组（ProductID / DeviceName / DeviceSecret），运行模拟器：
 
 ```powershell
 cd tools\simulator
 npm install
 # MQTT 设备：每 5 秒上报温湿度，接收下行命令与影子
-node simulator.js <productKey> <deviceName> <deviceSecret>
+node simulator.js <productId> <deviceName> <deviceSecret>
 # TCP 透传(DTU)设备
-node dtu.js <productKey> <deviceName> <deviceSecret>
+node dtu.js <productId> <deviceName> <deviceSecret>
 # TCP + Modbus 从机模拟
-node dtu-modbus.js <productKey> <deviceName> <deviceSecret>
+node dtu-modbus.js <productId> <deviceName> <deviceSecret>
 ```
 
 设备详情页可看到实时数据、历史曲线、上下线事件，并可下发 JSON 命令。
@@ -161,10 +161,10 @@ node dtu-modbus.js <productKey> <deviceName> <deviceSecret>
 | 项 | 约定 |
 |---|---|
 | Broker | `tcp://<host>:1883` |
-| ClientID | `{productKey}.{deviceName}` |
+| ClientID | `{productId}.{deviceName}` |
 | Username | `{deviceName}` |
 | Password | 设备 Secret，或动态 Token（`tk:` 开头） |
-| 遗嘱(LWT) | 发布到 `thing/offline/{productKey}/{deviceName}`，TCP 断开秒级离线 |
+| 遗嘱(LWT) | 发布到 `thing/offline/{productId}/{deviceName}`，TCP 断开秒级离线 |
 
 ### MQTT 主题
 
@@ -206,7 +206,7 @@ EMQX 通过 HTTP 回调后端做设备身份校验与主题级 ACL：
 
 ```http
 POST /api/v1/auth/token
-{ "productKey": "...", "deviceName": "...", "secret": "..." }
+{ "productId": "...", "deviceName": "...", "secret": "..." }
 → { "code": 0, "data": { "token": "tk:...", "ttl": 3600 } }
 ```
 
@@ -216,7 +216,7 @@ Token 存于 Redis（`device:token:{token}`），过期/撤销即失效。
 
 | 阶段 | 约定 |
 |---|---|
-| 注册包 | 连接后 10 秒内发送：三元组 `{productKey},{deviceName},{secret}\n` 或自定义注册码（单行，匹配设备 `regCode`，如 IMEI/ICCID） |
+| 注册包 | 连接后 10 秒内发送：三元组 `{productId},{deviceName},{secret}\n` 或自定义注册码（单行，匹配设备 `regCode`，如 IMEI/ICCID） |
 | 鉴权 | 成功回复 `OK\n`，失败回复 `ERR\n` 并断开 |
 | 组帧 | 按产品配置切分：`none`（不组帧）/`delimiter`（定界符）/`length`（长度字段）；Modbus 产品固定按 RTU 帧组帧 |
 | 心跳 | 默认 `PING`→`PONG`；或产品自定义（支持文本或 `0x` HEX） |
@@ -228,7 +228,7 @@ Token 存于 Redis（`device:token:{token}`），过期/撤销即失效。
 
 ```http
 POST /api/v1/http/telemetry
-Header: X-Device-Token: Base64(productKey:deviceName:secret)
+Header: X-Device-Token: Base64(productId:deviceName:secret)
 Body:   { "temperature": 25.5, "humidity": 60 }
 ```
 

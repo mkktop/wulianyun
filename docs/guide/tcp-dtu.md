@@ -8,7 +8,7 @@
 
 ```
 设备 ──TCP连接 :9100──► 平台
-设备 ──注册包(10s内)────► {productKey},{deviceName},{secret}\n   或   RegCode\n
+设备 ──注册包(10s内)────► {productId},{deviceName},{secret}\n   或   RegCode\n
 平台 ──OK\n──► 设备（鉴权成功，进入数据阶段）
 平台 ──ERR\n──► 设备（鉴权失败，随即断开）
 设备 ──数据帧──► 平台（按组帧配置切分，心跳 `PING`/`PONG`）
@@ -141,11 +141,11 @@ function encode(obj) {
 ```js
 const net = require('net')
 
-const [productKey, deviceName, secret] = [process.argv[2], process.argv[3], process.argv[4]]
+const [productId, deviceName, secret] = [process.argv[2], process.argv[3], process.argv[4]]
 const sock = net.connect({ host: '127.0.0.1', port: 9100 })
 
 // 1. 注册包
-sock.write(`${productKey},${deviceName},${secret}\n`)
+sock.write(`${productId},${deviceName},${secret}\n`)
 
 // 2. 等待 OK
 sock.on('data', (chunk) => {

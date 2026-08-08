@@ -72,7 +72,7 @@ type Product struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
 	UserID      uint      `gorm:"index;not null" json:"userId"`
 	Name        string    `gorm:"size:64;not null" json:"name"`
-	ProductKey  string    `gorm:"size:32;uniqueIndex;not null" json:"productKey"`
+	ProductKey  string    `gorm:"size:32;uniqueIndex;not null" json:"productId"`
 	Protocol    string    `gorm:"size:16;default:mqtt" json:"protocol"` // mqtt / tcp / http
 	DataFormat  string    `gorm:"size:16;default:json" json:"dataFormat"`
 	AccessMode  string    `gorm:"size:16;default:thingmodel" json:"accessMode"` // thingmodel/passthrough/modbus
@@ -105,8 +105,8 @@ type Product struct {
 type Device struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
 	UserID        uint       `gorm:"index;not null" json:"userId"`
-	ProductID     uint       `gorm:"index;not null" json:"productId"`
-	ProductKey    string     `gorm:"size:32;not null;uniqueIndex:idx_product_device,priority:1" json:"productKey"`
+	ProductID     uint       `gorm:"index;not null" json:"productDbId"`
+	ProductKey    string     `gorm:"size:32;not null;uniqueIndex:idx_product_device,priority:1" json:"productId"`
 	Name          string     `gorm:"size:64;not null;uniqueIndex:idx_product_device,priority:2" json:"name"`
 	Secret        string     `gorm:"size:64;not null" json:"secret"`
 	RegCode       string     `gorm:"size:64;index" json:"regCode"` // TCP 自定义注册码(IMEI/ICCID 等)，非空时可免三元组注册
@@ -128,7 +128,7 @@ type Device struct {
 type Telemetry struct {
 	Ts               time.Time      `gorm:"index:idx_dev_ts,priority:2,sort:desc;not null" json:"ts"`
 	DeviceID         uint           `gorm:"index:idx_dev_ts,priority:1;not null" json:"deviceId"`
-	ProductKey       string         `gorm:"size:32" json:"productKey"`
+	ProductKey       string         `gorm:"size:32" json:"productId"`
 	DeviceName       string         `gorm:"size:64" json:"deviceName"`
 	Data             datatypes.JSON `gorm:"type:jsonb" json:"data"`
 	Valid            bool           `json:"valid"`

@@ -11,7 +11,7 @@ import (
 func ListTraces(c *gin.Context) {
 	var params struct {
 		DeviceID   uint   `form:"deviceId"`
-		ProductKey string `form:"productKey"`
+		ProductKey string `form:"productId"`
 		TraceID    string `form:"traceId"`
 		Status     string `form:"status"`
 		StartTime  string `form:"startTime"`

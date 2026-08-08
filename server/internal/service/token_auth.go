@@ -43,7 +43,7 @@ func GenerateDeviceToken(productKey, deviceName, secret string) (string, int, er
 	ctx := context.Background()
 	tokenData, _ := json.Marshal(map[string]interface{}{
 		"deviceId":   d.ID,
-		"productKey": productKey,
+		"productId": productKey,
 		"deviceName": deviceName,
 		"issuedAt":   time.Now().Unix(),
 	})
@@ -69,7 +69,7 @@ func ValidateDeviceToken(token string) (*model.Device, error) {
 	}
 	var info struct {
 		DeviceID   uint   `json:"deviceId"`
-		ProductKey string `json:"productKey"`
+		ProductKey string `json:"productId"`
 		DeviceName string `json:"deviceName"`
 	}
 	json.Unmarshal(data, &info)

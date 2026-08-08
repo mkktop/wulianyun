@@ -182,7 +182,7 @@ func ExportThingModel(c *gin.Context) {
 	}
 
 	exportData := gin.H{
-		"productKey": p.ProductKey,
+		"productId": p.ProductKey,
 		"productName": p.Name,
 		"properties": json.RawMessage(tm.Properties),
 		"events":     json.RawMessage(tm.Events),

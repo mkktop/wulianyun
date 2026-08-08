@@ -1,25 +1,25 @@
 # 示例代码
 
-> 一站式最小可运行示例。所有示例假定已取得设备三元组（`ProductKey / DeviceName / DeviceSecret`），平台地址为 `http://<平台地址>`。
+> 一站式最小可运行示例。所有示例假定已取得设备三元组（`ProductID / DeviceName / DeviceSecret`），平台地址为 `http://<平台地址>`。
 
 ## 一、MQTT 上报 + 接收下行（Node.js）
 
 ```js
 const mqtt = require('mqtt')
 
-const productKey = 'pk...'
+const productId = 'pk...'
 const deviceName = 'dev1'
 const secret = '...'
 
 const client = mqtt.connect('mqtt://<平台地址>:1883', {
-  clientId: `${productKey}.${deviceName}`,
+  clientId: `${productId}.${deviceName}`,
   username: deviceName,
   password: secret,
   reconnectPeriod: 3000,
 })
 
-const up = `thing/up/${productKey}/${deviceName}`
-const down = `thing/down/${productKey}/${deviceName}`
+const up = `thing/up/${productId}/${deviceName}`
+const down = `thing/down/${productId}/${deviceName}`
 
 client.on('connect', () => {
   console.log('已连接')
@@ -76,7 +76,7 @@ sock.on('data', (chunk) => {
 })
 
 // 注册包：三元组逗号分隔，\n 结尾
-sock.write(`${productKey},${deviceName},${secret}\n`)
+sock.write(`${productId},${deviceName},${secret}\n`)
 ```
 
 ## 四、HTTP 直传
@@ -133,7 +133,7 @@ print(r.json())
 ```bash
 curl -X POST http://<平台地址>/api/v1/auth/token \
   -H "Content-Type: application/json" \
-  -d '{"productKey":"pk123","deviceName":"dev1","secret":"secret123"}'
+  -d '{"productId":"pk123","deviceName":"dev1","secret":"secret123"}'
 ```
 
 ```json
@@ -149,13 +149,13 @@ cd tools/simulator
 npm install
 
 # MQTT 设备：每 5 秒上报温湿度，接收下行命令与影子
-node simulator.js <productKey> <deviceName> <deviceSecret> [broker]
+node simulator.js <productId> <deviceName> <deviceSecret> [broker]
 
 # TCP 透传（DTU）设备
-node dtu.js <productKey> <deviceName> <deviceSecret> [host] [port]
+node dtu.js <productId> <deviceName> <deviceSecret> [host] [port]
 
 # TCP + Modbus 从机模拟
-node dtu-modbus.js <productKey> <deviceName> <deviceSecret> [host] [port]
+node dtu-modbus.js <productId> <deviceName> <deviceSecret> [host] [port]
 ```
 
 ## 八、WebSocket 实时订阅（管理端）

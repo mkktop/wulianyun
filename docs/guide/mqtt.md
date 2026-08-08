@@ -10,13 +10,13 @@
 |---|---|---|
 | Broker | `tcp://<平台地址>:1883` | 生产环境为公网地址；本地开发 `127.0.0.1:1883` |
 | MQTT over WebSocket | `ws://<平台地址>:8083` | 浏览器/弱网设备 |
-| ClientID | `{productKey}.{deviceName}` | **必须**，平台按第一个 `.` 拆分解析 |
+| ClientID | `{productId}.{deviceName}` | **必须**，产品ID 固定 12 字符，按字符数解析（设备名可含 `.`） |
 | Username | `{deviceName}` | 仅设备名，不含产品前缀 |
 | Password | `{deviceSecret}` | 一机一密下的设备密钥；或 `tk:{token}` 动态令牌 |
 | Clean Session | 建议 `false` | 持久会话，重连后补发离线消息 |
 | Keep Alive | 建议 ≤ 60s | 配合遗嘱实现秒级离线 |
 
-⚠️ **ClientID 中不能包含 `.`**（`{productKey}` 与 `{deviceName}` 之间唯一的 `.` 用于拆分），产品密钥与设备名均不允许出现点号。
+> 产品ID 固定 **12 字符**（2 位大写字母 + 10 位数字，如 `AB1234567890`），平台取 ClientID 前 12 字符作为产品ID、其余部分作为设备名，**设备名可以包含点号**（旧版 pk 开头的 18 字符产品ID 仍兼容）。
 
 ### 鉴权流程
 
@@ -30,7 +30,7 @@
 
 - 密码以 `tk:` 开头 → 走动态令牌校验（`ValidateDeviceToken`），否则按固定密钥校验（`FindDeviceForAuth`，兼容一机一密 / 一型一密）
 - 设备被禁用 → `{"result":"deny","comment":"device disabled"}`
-- 鉴权成功时平台会把 `username` 重写为 `{productKey}/{deviceName}`（斜杠分隔）
+- 鉴权成功时平台会把 `username` 重写为 `{productId}/{deviceName}`（斜杠分隔）
 
 ## 二、Topic 全表
 
@@ -124,7 +124,7 @@ payload 中带字符串 `method` 字段时，平台按方法分流：
 POST /api/v1/auth/token
 Content-Type: application/json
 
-{ "productKey": "pk...", "deviceName": "dev1", "secret": "..." }
+{ "productId": "pk...", "deviceName": "dev1", "secret": "..." }
 ```
 
 ```json
@@ -139,12 +139,12 @@ Content-Type: application/json
 ```js
 const mqtt = require('mqtt')
 
-const productKey = 'pk...'
+const productId = 'pk...'
 const deviceName = 'dev1'
 const secret = '...'
 
 const client = mqtt.connect('mqtt://<平台地址>:1883', {
-  clientId: `${productKey}.${deviceName}`,
+  clientId: `${productId}.${deviceName}`,
   username: deviceName,
   password: secret,
   reconnectPeriod: 3000,
@@ -152,9 +152,9 @@ const client = mqtt.connect('mqtt://<平台地址>:1883', {
 
 client.on('connect', () => {
   // 订阅下行
-  client.subscribe(`thing/down/${productKey}/${deviceName}`, { qos: 1 })
+  client.subscribe(`thing/down/${productId}/${deviceName}`, { qos: 1 })
   // 上报遥测
-  client.publish(`thing/up/${productKey}/${deviceName}`, JSON.stringify({
+  client.publish(`thing/up/${productId}/${deviceName}`, JSON.stringify({
     temperature: 25.5, humidity: 60.2,
   }), { qos: 1 })
 })
@@ -163,7 +163,7 @@ client.on('message', (topic, payload) => {
   const msg = JSON.parse(payload.toString())
   if (msg.method === 'property.set') {
     // 应用属性并回报新值
-    client.publish(`thing/up/${productKey}/${deviceName}`, JSON.stringify(msg.params), { qos: 1 })
+    client.publish(`thing/up/${productId}/${deviceName}`, JSON.stringify(msg.params), { qos: 1 })
   }
 })
 ```

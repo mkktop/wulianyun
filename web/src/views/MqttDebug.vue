@@ -26,7 +26,7 @@
           <template #header><span>发布消息</span></template>
           <el-form label-width="60px" size="small">
             <el-form-item label="Topic">
-              <el-input v-model="pubTopic" placeholder="thing/up/productKey/deviceName" />
+              <el-input v-model="pubTopic" placeholder="thing/up/productId/deviceName" />
             </el-form-item>
             <el-form-item label="QoS">
               <el-radio-group v-model="pubQos">

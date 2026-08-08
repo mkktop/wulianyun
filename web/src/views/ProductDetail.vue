@@ -13,8 +13,8 @@
           </div>
           <el-button v-if="canWrite" link type="primary" @click="$router.push(`/products/${product.id}/edit`)">编辑</el-button>
         </div>
-        <div class="info-item"><div class="label">ProductKey</div><div class="val">{{ product.productKey }}
-          <el-button link type="primary" size="small" @click="copy(product.productKey)">复制</el-button></div>
+        <div class="info-item"><div class="label">ProductID</div><div class="val">{{ product.productId }}
+          <el-button link type="primary" size="small" @click="copy(product.productId)">复制</el-button></div>
         </div>
         <div class="info-item" v-if="product.secretMode === 'product'">
           <div class="label">ProductSecret</div>
@@ -257,7 +257,7 @@
     <!-- 自定义广播 -->
     <el-dialog v-model="broadcastVisible" title="自定义广播" width="520px">
       <el-alert type="warning" :closable="false" style="margin-bottom: 12px">
-        JSON 消息将下发到产品下全部在线设备（MQTT 设备需订阅 thing/broadcast/{{ product.productKey }}）
+        JSON 消息将下发到产品下全部在线设备（MQTT 设备需订阅 thing/broadcast/{{ product.productId }}）
       </el-alert>
       <el-input v-model="broadcastText" type="textarea" :rows="8" placeholder='{"method":"custom.notify","params":{}}' spellcheck="false" style="font-family: monospace" />
       <template #footer>
@@ -396,7 +396,7 @@ function toArr(v: any) {
 // MQTT Topic 约定表
 const topics = computed(() => {
   if (!product.value) return []
-  const pk = product.value.productKey
+  const pk = product.value.productId
   return [
     { topic: `thing/up/${pk}/{deviceName}`, dir: '上行', desc: '属性上报（JSON）；含 method=event.post 时为事件上报' },
     { topic: `thing/down/${pk}/{deviceName}`, dir: '下行', desc: '属性设置/服务调用/透传命令' },
@@ -477,7 +477,7 @@ async function exportTsl() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `tsl-${product.value?.productKey || id}.json`
+    a.download = `tsl-${product.value?.productId || id}.json`
     a.click()
     URL.revokeObjectURL(url)
     ElMessage.success('导出成功')

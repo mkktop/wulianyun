@@ -154,10 +154,10 @@ func EnsureAdmin() {
 }
 
 // DeviceToken 设备动态获取 MQTT 连接 Token
-// POST /api/v1/auth/token  Body: {"productKey":"...","deviceName":"...","secret":"..."}
+// POST /api/v1/auth/token  Body: {"productId":"...","deviceName":"...","secret":"..."}
 func DeviceToken(c *gin.Context) {
 	var req struct {
-		ProductKey string `json:"productKey" binding:"required"`
+		ProductKey string `json:"productId" binding:"required"`
 		DeviceName string `json:"deviceName" binding:"required"`
 		Secret     string `json:"secret" binding:"required"`
 	}

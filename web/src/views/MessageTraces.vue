@@ -152,7 +152,7 @@ async function load() {
     if (search.status) params.status = search.status
     if (search.productId) {
       const p = products.value.find(x => x.id === search.productId)
-      if (p) params.productKey = p.productKey
+      if (p) params.productId = p.productId
     }
     if (search.timeRange) {
       params.startTime = search.timeRange[0].toISOString()

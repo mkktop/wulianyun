@@ -12,7 +12,7 @@
         <el-button @click="$router.back()">返回</el-button>
       </div>
       <el-descriptions :column="2" border style="margin-top: 12px">
-        <el-descriptions-item label="ProductKey">{{ device.productKey }}</el-descriptions-item>
+        <el-descriptions-item label="ProductID">{{ device.productId }}</el-descriptions-item>
         <el-descriptions-item label="DeviceName">{{ device.name }}</el-descriptions-item>
         <el-descriptions-item label="DeviceSecret">
           <el-text>{{ secretVisible ? device.secret : '********' }}</el-text>
@@ -21,9 +21,9 @@
           </el-button>
           <el-button link type="primary" @click="copy(device.secret)">复制</el-button>
         </el-descriptions-item>
-        <el-descriptions-item label="MQTT ClientID">{{ device.productKey }}.{{ device.name }}</el-descriptions-item>
-        <el-descriptions-item label="上报主题">thing/up/{{ device.productKey }}/{{ device.name }}</el-descriptions-item>
-        <el-descriptions-item label="下发主题">thing/down/{{ device.productKey }}/{{ device.name }}</el-descriptions-item>
+        <el-descriptions-item label="MQTT ClientID">{{ device.productId }}.{{ device.name }}</el-descriptions-item>
+        <el-descriptions-item label="上报主题">thing/up/{{ device.productId }}/{{ device.name }}</el-descriptions-item>
+        <el-descriptions-item label="下发主题">thing/down/{{ device.productId }}/{{ device.name }}</el-descriptions-item>
         <el-descriptions-item label="最后上线">{{ fmt(device.lastOnlineAt) }}</el-descriptions-item>
         <el-descriptions-item label="最后离线">{{ fmt(device.lastOfflineAt) }}</el-descriptions-item>
       </el-descriptions>
@@ -216,7 +216,7 @@
           <el-table :data="subDevices" v-loading="subLoading" stripe>
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column prop="name" label="设备名称" />
-            <el-table-column prop="productKey" label="ProductKey" width="160" />
+            <el-table-column prop="productId" label="ProductID" width="160" />
             <el-table-column label="状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
@@ -514,7 +514,7 @@ async function load() {
     lastTs.value = l.ts
   }
   events.value = (await api.deviceEvents(id, { size: 50 })).list
-  if (device.value?.productId) await loadThingModel(device.value.productId)
+  if (device.value?.productDbId) await loadThingModel(device.value.productDbId)
 }
 
 async function loadHistory() {

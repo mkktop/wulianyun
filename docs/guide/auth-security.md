@@ -8,7 +8,7 @@
 
 | 项 | 值 |
 |---|---|
-| ClientID | `{productKey}.{deviceName}` |
+| ClientID | `{productId}.{deviceName}` |
 | Username | `{deviceName}` |
 | Password | 设备 Secret（一机一密）或产品 `ProductSecret`（一型一密）或 `tk:{token}` 动态令牌 |
 
@@ -27,7 +27,7 @@
 POST /api/v1/auth/token
 Content-Type: application/json
 
-{ "productKey": "pk...", "deviceName": "dev1", "secret": "..." }
+{ "productId": "pk...", "deviceName": "dev1", "secret": "..." }
 ```
 
 ```json
@@ -53,7 +53,7 @@ POST /api/v1/emqx/acl     （Topic 授权）
 
 ### 1.5 HTTP 直传鉴权
 
-`POST /api/v1/http/telemetry`，头 `X-Device-Token: Base64(productKey:deviceName:secret)`（仅静态 Secret，不支持 `tk:`）。
+`POST /api/v1/http/telemetry`，头 `X-Device-Token: Base64(productId:deviceName:secret)`（仅静态 Secret，不支持 `tk:`）。
 
 ## 二、管理端认证（JWT）
 

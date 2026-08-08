@@ -119,7 +119,7 @@
           <el-input v-model="newTag" size="small" style="width: 100px" placeholder="+标签" @keyup.enter="addTag" @blur="addTag" />
         </div>
       </el-form-item>
-      <el-form-item label="注册码" v-if="isTcpProduct(editing?.productId)">
+      <el-form-item label="注册码" v-if="isTcpProduct(editing?.productDbId)">
         <el-input v-model="editForm.regCode" placeholder="选填，IMEI/ICCID 等" />
       </el-form-item>
       <el-form-item label="备注">

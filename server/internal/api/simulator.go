@@ -16,9 +16,9 @@ import (
 type simSession struct {
 	ID         string    `json:"id"`
 	UserID     uint      `json:"userId"`
-	ProductID  uint      `json:"productId"`
+	ProductID  uint      `json:"productDbId"`
 	DeviceID   uint      `json:"deviceId"`
-	ProductKey string    `json:"productKey"`
+	ProductKey string    `json:"productId"`
 	DeviceName string    `json:"deviceName"`
 	Status     string    `json:"status"`
 	CreatedAt  time.Time `json:"createdAt"`

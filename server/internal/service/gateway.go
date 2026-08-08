@@ -14,7 +14,7 @@ import (
 
 // HandleGatewaySubDevice 处理网关代理的子设备上下线
 // Topic: thing/gateway/{pk}/{dn}/sub/{subId}/login   或 thing/gateway/{pk}/{dn}/sub/{subId}/logout
-// Payload: {"productKey":"...","deviceName":"...","secret":"...","timestamp":...}
+// Payload: {"productId":"...","deviceName":"...","secret":"...","timestamp":...}
 func HandleGatewaySubDevice(topic string, payload []byte) {
 	parts := strings.Split(topic, "/")
 	// thing/gateway/{pk}/{gatewayDn}/sub/{subId}/{login|logout}
@@ -27,7 +27,7 @@ func HandleGatewaySubDevice(topic string, payload []byte) {
 	action := parts[6] // login / logout
 
 	var req struct {
-		ProductKey string `json:"productKey"`
+		ProductKey string `json:"productId"`
 		DeviceName string `json:"deviceName"`
 		Secret     string `json:"secret"`
 		Timestamp  int64  `json:"timestamp"`

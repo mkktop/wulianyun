@@ -13,14 +13,14 @@ thing/gateway/{pk}/{gatewayName}/sub/{subId}/login
 thing/gateway/{pk}/{gatewayName}/sub/{subId}/logout
 ```
 
-- `{pk}` / `{gatewayName}`：网关设备自身的 ProductKey / DeviceName
+- `{pk}` / `{gatewayName}`：网关设备自身的 ProductID / DeviceName
 - `{subId}`：子设备标识（与子设备 DeviceName 一致）
 
 ### 载荷
 
 ```json
 {
-  "productKey": "pk_sub",
+  "productId": "pk_sub",
   "deviceName": "sub-dev-1",
   "secret": "sub-secret-123",
   "timestamp": 1785712345678
@@ -29,7 +29,7 @@ thing/gateway/{pk}/{gatewayName}/sub/{subId}/logout
 
 | 字段 | 说明 |
 |---|---|
-| `productKey` / `deviceName` | 子设备的三元组标识 |
+| `productId` / `deviceName` | 子设备的三元组标识 |
 | `secret` | 子设备密钥（一机一密）或产品 `ProductSecret`（一型一密） |
 | `timestamp` | 可选 |
 

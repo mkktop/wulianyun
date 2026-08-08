@@ -10,7 +10,7 @@ import (
 
 // DownMessage 跨实例下行消息
 type DownMessage struct {
-	ProductKey string `json:"productKey"`
+	ProductKey string `json:"productId"`
 	DeviceName string `json:"deviceName"`
 	Payload    []byte `json:"payload"`
 }

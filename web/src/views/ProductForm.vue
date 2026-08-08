@@ -107,7 +107,7 @@
     <el-dialog v-model="secretDialogVisible" title="产品创建成功" width="460px" :close-on-click-modal="false" @close="goList">
       <el-alert type="success" :closable="false" style="margin-bottom: 12px">请妥善保存产品密钥，用于设备一型一密接入</el-alert>
       <el-descriptions :column="1" border>
-        <el-descriptions-item label="ProductKey">{{ createdProduct?.productKey }}</el-descriptions-item>
+        <el-descriptions-item label="ProductID">{{ createdProduct?.productId }}</el-descriptions-item>
         <el-descriptions-item label="ProductSecret">
           <el-text>{{ createdProduct?.productSecret }}</el-text>
           <el-button link type="primary" size="small" @click="copy(createdProduct?.productSecret || '')">复制</el-button>

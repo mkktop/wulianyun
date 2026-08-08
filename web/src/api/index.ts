@@ -54,7 +54,7 @@ http.interceptors.response.use(
 export interface Product {
   id: number
   name: string
-  productKey: string
+  productId: string
   protocol: string
   dataFormat: string
   accessMode: string
@@ -123,8 +123,8 @@ export interface ModbusGroup {
 
 export interface Device {
   id: number
-  productId: number
-  productKey: string
+  productDbId: number
+  productId: string
   productName: string
   name: string
   secret: string

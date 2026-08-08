@@ -366,7 +366,7 @@ func doForward(r *model.Rule, d *model.Device, data map[string]interface{}) {
 		return
 	}
 	go postJSONWithRetry(act.WebhookURL, map[string]interface{}{
-		"type": "telemetry", "productKey": d.ProductKey, "device": d.Name,
+		"type": "telemetry", "productId": d.ProductKey, "device": d.Name,
 		"data": data, "ts": time.Now().UnixMilli(),
 	}, r.RetryCount)
 }

@@ -18,15 +18,15 @@
 
 ## 二、快速开始（10 分钟接入一台设备）
 
-1. **登录平台** → 产品管理 → 创建产品（记录 `ProductKey`，选择接入数据模式）
+1. **登录平台** → 产品管理 → 创建产品（记录 `ProductID`，选择接入数据模式）
 2. 进入产品 → 设备管理 → 添加设备（记录 `DeviceName` 与 `DeviceSecret`）
-3. 得到设备**三元组**：`ProductKey / DeviceName / DeviceSecret`
+3. 得到设备**三元组**：`ProductID / DeviceName / DeviceSecret`
 4. 按 [MQTT接入协议](/guide/mqtt) 接入，或直接运行内置模拟器：
 
 ```bash
 cd tools/simulator
 npm install
-node simulator.js <productKey> <deviceName> <deviceSecret> [broker]
+node simulator.js <productId> <deviceName> <deviceSecret> [broker]
 ```
 
 5. 平台「设备详情」页实时看到数据、上下线事件，并可下发命令。
@@ -35,7 +35,7 @@ node simulator.js <productKey> <deviceName> <deviceSecret> [broker]
 
 | 概念 | 说明 |
 |---|---|
-| **三板斧（三元组）** | `ProductKey`（产品唯一标识）+ `DeviceName`（产品内设备名）+ `DeviceSecret`（设备密钥），设备连接与鉴权的唯一凭证 |
+| **三板斧（三元组）** | `ProductID`（产品唯一标识）+ `DeviceName`（产品内设备名）+ `DeviceSecret`（设备密钥），设备连接与鉴权的唯一凭证 |
 | **接入数据模式** | `thingmodel`（标准物模型 JSON）/ `passthrough`（透传脚本 `/` 二进制）/ `modbus`（Modbus 云端轮询） |
 | **密钥模式** | `device`（一机一密，默认）/ `product`（一型一密，`ProductSecret` 可免预注册动态建号） |
 | **物模型 TSL** | 产品的能力描述：`properties`（属性）/ `events`（事件）/ `services`（服务），见 [物模型TSL](/guide/tsl) |
@@ -46,7 +46,7 @@ node simulator.js <productKey> <deviceName> <deviceSecret> [broker]
 | 项 | 值 |
 |---|---|
 | MQTT Broker | `tcp://<平台地址>:1883`（WebSocket：`ws://<平台地址>:8083`） |
-| MQTT ClientID | `{productKey}.{deviceName}` |
+| MQTT ClientID | `{productId}.{deviceName}` |
 | MQTT Username | `{deviceName}` |
 | MQTT Password | `{deviceSecret}` 或 `tk:{token}` 动态令牌 |
 | TCP 网关 | `<平台地址>:9100` |

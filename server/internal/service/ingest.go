@@ -89,7 +89,7 @@ func FindDeviceForAuth(productKey, deviceName, secret string) (*model.Device, er
 		if err := repository.DB.Create(&nd).Error; err != nil {
 			return nil, errors.New("动态注册失败")
 		}
-		slog.Info("device auto-registered", "productKey", productKey, "device", deviceName)
+		slog.Info("device auto-registered", "productId", productKey, "device", deviceName)
 		return &nd, nil
 	}
 	return nil, errors.New("设备不存在或密钥错误")
@@ -113,13 +113,45 @@ func FindDeviceByRegCode(regCode string) (*model.Device, error) {
 	return &d, nil
 }
 
-// ParseClientID clientid 约定为 {productKey}.{deviceName}
+// ParseClientID clientid 约定为 {productId}.{deviceName}
+// 产品ID 固定 12 字符（2 位字母 + 10 位数字），按字符数解析（设备名可含点号）；
+// 兼容旧格式（pk+16hex 共 18 字符）：按新格式解析失败后回退按点号拆分
 func ParseClientID(clientID string) (productKey, deviceName string, ok bool) {
-	parts := strings.SplitN(clientID, ".", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", false
+	// 新格式：前 12 字符为产品ID，第 13 字符为分隔点号
+	if len(clientID) > 13 && isNewProductID(clientID[:12]) && clientID[12] == '.' {
+		dn := clientID[13:]
+		if dn != "" {
+			return clientID[:12], dn, true
+		}
 	}
-	return parts[0], parts[1], true
+	// 旧格式兼容：{pk+16hex}.{deviceName}
+	if len(clientID) > 19 && strings.HasPrefix(clientID, "pk") && clientID[18] == '.' {
+		dn := clientID[19:]
+		if dn != "" {
+			return clientID[:18], dn, true
+		}
+	}
+	return "", "", false
+}
+
+// isNewProductID 判断是否为固定 12 字符产品ID：2 位大写字母 + 10 位数字
+func isNewProductID(s string) bool {
+	if len(s) != 12 {
+		return false
+	}
+	for i := 0; i < 2; i++ {
+		c := s[i]
+		if c < 'A' || c > 'Z' {
+			return false
+		}
+	}
+	for i := 2; i < 12; i++ {
+		c := s[i]
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // HandleTelemetry 处理设备上行数据（JSON 对象）；含 method=event.post 时分流到事件上报
@@ -129,12 +161,12 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 
 	var data map[string]interface{}
 	if err := json.Unmarshal(payload, &data); err != nil || len(data) == 0 {
-		slog.Warn("invalid telemetry payload", "productKey", productKey, "device", deviceName)
+		slog.Warn("invalid telemetry payload", "productId", productKey, "device", deviceName)
 		return
 	}
 	d, err := FindDevice(productKey, deviceName)
 	if err != nil {
-		slog.Warn("telemetry from unknown device", "productKey", productKey, "device", deviceName)
+		slog.Warn("telemetry from unknown device", "productId", productKey, "device", deviceName)
 		return
 	}
 
