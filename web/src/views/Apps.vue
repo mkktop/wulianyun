@@ -14,7 +14,7 @@
       <el-table-column label="AppKey" min-width="200">
         <template #default="{ row }">
           <el-text type="info">{{ row.appKey }}</el-text>
-          <el-button link type="primary" size="small" @click="copy(row.appKey)">复制</el-button>
+          <el-button link type="primary" size="small" @click="copyText(row.appKey)">复制</el-button>
         </template>
       </el-table-column>
       <el-table-column label="AppSecret" min-width="240">
@@ -23,7 +23,7 @@
           <el-button link type="primary" size="small" @click="secretShown[row.id] = !secretShown[row.id]">
             {{ secretShown[row.id] ? '隐藏' : '查看' }}
           </el-button>
-          <el-button link type="primary" size="small" @click="copy(row.appSecret)">复制</el-button>
+          <el-button link type="primary" size="small" @click="copyText(row.appSecret)">复制</el-button>
         </template>
       </el-table-column>
       <el-table-column label="启用" width="80">
@@ -71,6 +71,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, type OpenApp } from '../api'
 import { fmtDateTime } from '../utils/format'
+import { copyText } from '../utils/clipboard'
 
 const list = ref<OpenApp[]>([])
 const loading = ref(false)
@@ -121,10 +122,6 @@ async function del(row: OpenApp) {
   load()
 }
 
-function copy(text: string) {
-  navigator.clipboard.writeText(text)
-  ElMessage.success('已复制')
-}
 
 function fmt(s: string) {
   return fmtDateTime(s)

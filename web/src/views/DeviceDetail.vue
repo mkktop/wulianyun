@@ -15,11 +15,13 @@
         <el-descriptions-item label="ProductID">{{ device.productId }}</el-descriptions-item>
         <el-descriptions-item label="DeviceName">{{ device.name }}</el-descriptions-item>
         <el-descriptions-item label="DeviceSecret">
-          <el-text>{{ secretVisible ? device.secret : '********' }}</el-text>
+          <el-text style="display: inline-block; min-width: 220px; font-family: Consolas, 'Courier New', monospace">
+            {{ secretVisible ? device.secret : '********************************' }}
+          </el-text>
           <el-button link type="primary" @click="secretVisible = !secretVisible">
             {{ secretVisible ? '隐藏' : '查看' }}
           </el-button>
-          <el-button link type="primary" @click="copy(device.secret)">复制</el-button>
+          <el-button link type="primary" @click="copyText(device.secret)">复制</el-button>
         </el-descriptions-item>
         <el-descriptions-item label="MQTT ClientID">{{ device.productId }}.{{ device.name }}</el-descriptions-item>
         <el-descriptions-item label="上报主题">thing/up/{{ device.productId }}/{{ device.name }}</el-descriptions-item>
@@ -277,6 +279,7 @@ import echarts from '../utils/echarts'
 import { api, type Device, type TslProperty, type TslService, isViewOnly } from '../api'
 import { fmtDateTime } from '../utils/format'
 import { realtime } from '../utils/realtime'
+import { copyText } from '../utils/clipboard'
 
 const route = useRoute()
 const id = Number(route.params.id)
@@ -668,10 +671,6 @@ function statusText(s: string) {
 }
 function fmt(s: string | null) {
   return fmtDateTime(s)
-}
-function copy(text: string) {
-  navigator.clipboard.writeText(text)
-  ElMessage.success('已复制')
 }
 
 const onResize = () => charts.forEach((c) => c.resize())

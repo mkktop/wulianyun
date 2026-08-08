@@ -21,7 +21,7 @@
       <el-table-column label="ProductKey" min-width="200">
         <template #default="{ row }">
           <el-text type="info">{{ row.productId }}</el-text>
-          <el-button link type="primary" size="small" @click="copy(row.productId)">复制</el-button>
+          <el-button link type="primary" size="small" @click="copyText(row.productId)">复制</el-button>
         </template>
       </el-table-column>
       <el-table-column label="接入方式" width="110">
@@ -73,6 +73,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, type Product, isSecondary } from '../api'
 import { fmtDate } from '../utils/format'
+import { copyText } from '../utils/clipboard'
 
 const router = useRouter()
 
@@ -117,10 +118,6 @@ function onCmd(cmd: string, row: Product) {
   }
 }
 
-function copy(text: string) {
-  navigator.clipboard.writeText(text)
-  ElMessage.success('已复制')
-}
 
 onMounted(load)
 </script>

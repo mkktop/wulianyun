@@ -14,7 +14,7 @@
           <el-button v-if="canWrite" link type="primary" @click="$router.push(`/products/${product.id}/edit`)">编辑</el-button>
         </div>
         <div class="info-item"><div class="label">ProductID</div><div class="val">{{ product.productId }}
-          <el-button link type="primary" size="small" @click="copy(product.productId)">复制</el-button></div>
+          <el-button link type="primary" size="small" @click="copyText(product.productId)">复制</el-button></div>
         </div>
         <div class="info-item" v-if="product.secretMode === 'product'">
           <div class="label">ProductSecret</div>
@@ -298,6 +298,7 @@ import { fmtDateTime } from '../utils/format'
 import ThingModelEditor from '../components/ThingModelEditor.vue'
 import ModbusPointEditor from '../components/ModbusPointEditor.vue'
 import CodecEditor from '../components/CodecEditor.vue'
+import { copyText } from '../utils/clipboard'
 
 const route = useRoute()
 const id = Number(route.params.id)
@@ -383,10 +384,6 @@ function evText(t: string) {
 }
 function fmt(s: string | null) {
   return fmtDateTime(s)
-}
-function copy(text: string) {
-  navigator.clipboard.writeText(text)
-  ElMessage.success('已复制')
 }
 function toArr(v: any) {
   if (!v) return []

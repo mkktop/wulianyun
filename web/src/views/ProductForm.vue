@@ -110,7 +110,7 @@
         <el-descriptions-item label="ProductID">{{ createdProduct?.productId }}</el-descriptions-item>
         <el-descriptions-item label="ProductSecret">
           <el-text>{{ createdProduct?.productSecret }}</el-text>
-          <el-button link type="primary" size="small" @click="copy(createdProduct?.productSecret || '')">复制</el-button>
+          <el-button link type="primary" size="small" @click="copyText(createdProduct?.productSecret || '')">复制</el-button>
         </el-descriptions-item>
       </el-descriptions>
       <template #footer>
@@ -128,6 +128,7 @@ import { api, type Product, type ModbusPoint, type TslProperty, type TslEvent, t
 import ThingModelEditor from '../components/ThingModelEditor.vue'
 import ModbusPointEditor from '../components/ModbusPointEditor.vue'
 import CodecEditor from '../components/CodecEditor.vue'
+import { copyText } from '../utils/clipboard'
 
 const route = useRoute()
 const router = useRouter()
@@ -250,10 +251,6 @@ function goList() {
   router.push('/products')
 }
 
-function copy(text: string) {
-  navigator.clipboard.writeText(text)
-  ElMessage.success('已复制')
-}
 
 onMounted(() => {
   if (isEdit.value) loadForEdit()
