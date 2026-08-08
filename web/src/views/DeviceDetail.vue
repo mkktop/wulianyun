@@ -121,9 +121,14 @@
             </div>
           </template>
           <el-empty v-if="!fields.length" description="暂无数值型数据" :image-size="80" />
-          <div v-for="f in fields" :key="f" class="field-chart">
+          <div v-for="f in pagedFields" :key="f" class="field-chart">
             <div class="field-title">{{ propLabel(f) }}<span v-if="propUnit(f)">（{{ propUnit(f) }}）</span></div>
             <div :ref="(el) => setChartEl(f, el as HTMLElement)" class="chart-sm"></div>
+          </div>
+          <div v-if="chartTotalPages > 1" class="chart-pager">
+            <el-button size="small" :disabled="chartPage <= 1" @click="chartPage--; changeChartPage()">上一页</el-button>
+            <el-text size="small">{{ chartPage }} / {{ chartTotalPages }}</el-text>
+            <el-button size="small" :disabled="chartPage >= chartTotalPages" @click="chartPage++; changeChartPage()">下一页</el-button>
           </div>
         </el-card>
 
@@ -276,8 +281,12 @@ const propMeta = computed(() => {
   return m
 })
 
-// 曲线：每个变量一张图
+// 曲线：每页最多 2 个变量，翻页查看
 const fields = ref<string[]>([])
+const chartPage = ref(1)
+const chartPageSize = 2
+const chartTotalPages = computed(() => Math.max(1, Math.ceil(fields.value.length / chartPageSize)))
+const pagedFields = computed(() => fields.value.slice((chartPage.value - 1) * chartPageSize, chartPage.value * chartPageSize))
 const series = new Map<string, [number, number][]>()
 const chartEls = new Map<string, HTMLElement>()
 const charts = new Map<string, echarts.ECharts>()
@@ -422,6 +431,15 @@ async function syncFields() {
   }
   fields.value = names
   await nextTick()
+}
+
+// 曲线翻页：销毁当前页图表实例，重建新页容器
+async function changeChartPage() {
+  charts.forEach((c) => c.dispose())
+  charts.clear()
+  chartEls.clear()
+  await nextTick()
+  renderAll()
 }
 
 function setChartEl(field: string, el: HTMLElement | null) {
@@ -613,6 +631,7 @@ onUnmounted(() => {
 .field-chart { margin-bottom: 8px; }
 .field-title { font-size: 13px; color: #666; font-weight: 600; padding: 4px 0; }
 .chart-sm { height: 170px; }
+.chart-pager { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 8px; }
 .prop-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .prop-info { flex: 1; display: flex; flex-direction: column; }
 .prop-name { font-size: 14px; }
