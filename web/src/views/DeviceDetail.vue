@@ -525,7 +525,8 @@ async function loadHistory() {
     start = customRange.value[0].getTime()
     end = customRange.value[1].getTime()
   }
-  const points = await api.deviceHistory(id, { start, end, limit: 5000 })
+  // 按时间范围估算数据条数（5s 上报周期），上限 50000
+  const points = await api.deviceHistory(id, { start, end, limit: Math.min(50000, Math.ceil((end - start) / 4000) + 200) })
   series.clear()
   for (const p of points) {
     for (const [k, v] of Object.entries(p.data)) {

@@ -44,7 +44,7 @@ func DeviceHistory(c *gin.Context) {
 	}
 	limit := 2000
 	if v := c.Query("limit"); v != "" {
-		if n := atoi(v); n > 0 && n <= 5000 {
+		if n := atoi(v); n > 0 && n <= 50000 {
 			limit = n
 		}
 	}
