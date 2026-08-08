@@ -50,7 +50,7 @@ func DeviceHistory(c *gin.Context) {
 	}
 	var rows []model.Telemetry
 	if err := repository.DB.
-		Where("device_id = ? AND ts >= ? AND ts <= ?", d.ID, start, end).
+		Where("device_id = ? AND ts >= ? AND ts <= ? AND valid = ?", d.ID, start, end, true).
 		Order("ts asc").Limit(limit).Find(&rows).Error; err != nil {
 		Fail(c, 500, "查询失败")
 		return

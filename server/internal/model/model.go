@@ -131,7 +131,7 @@ type Telemetry struct {
 	ProductKey       string         `gorm:"size:32" json:"productKey"`
 	DeviceName       string         `gorm:"size:64" json:"deviceName"`
 	Data             datatypes.JSON `gorm:"type:jsonb" json:"data"`
-	Valid            bool           `gorm:"default:true" json:"valid"`
+	Valid            bool           `json:"valid"`
 	ValidationErrors datatypes.JSON `gorm:"type:jsonb" json:"validationErrors,omitempty"`
 }
 
