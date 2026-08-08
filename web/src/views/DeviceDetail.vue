@@ -112,7 +112,7 @@
         <el-card shadow="never">
           <template #header>
             <div class="card-head">
-              <span>历史曲线（每个变量独立图表）</span>
+              <span>历史曲线</span>
               <div class="curve-tools">
                 <el-radio-group v-model="range" size="small" @change="onRangeChange">
                   <el-radio-button :value="1">1小时</el-radio-button>
