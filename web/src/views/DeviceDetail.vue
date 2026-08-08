@@ -169,8 +169,8 @@
                 <el-tag size="small" :type="logCategoryType(row.category)">{{ logCategoryText(row.category) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="summary" label="摘要" min-width="240" show-overflow-tooltip />
-            <el-table-column label="数据" min-width="220">
+            <el-table-column prop="summary" label="摘要" width="180" show-overflow-tooltip />
+            <el-table-column label="数据" min-width="300">
               <template #default="{ row }">
                 <el-text size="small" class="payload-preview">{{ row.payload || '-' }}</el-text>
               </template>
