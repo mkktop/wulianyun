@@ -292,7 +292,7 @@ func handleConn(conn net.Conn) {
 	sessions[key] = s
 	mu.Unlock()
 
-	service.HandleDeviceStatus(key, true)
+	service.QueueStatus(key, true, 0)
 	if OnDeviceConnect != nil {
 		OnDeviceConnect(productKey, deviceName, d.ProductID)
 	}
@@ -304,7 +304,7 @@ func handleConn(conn net.Conn) {
 		if cur, ok := sessions[key]; ok && cur == s {
 			delete(sessions, key)
 			mu.Unlock()
-			service.HandleDeviceStatus(key, false)
+			service.QueueStatus(key, false, 0)
 			if OnDeviceDisconnect != nil {
 				OnDeviceDisconnect(productKey, deviceName)
 			}

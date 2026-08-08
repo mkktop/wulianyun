@@ -100,7 +100,8 @@ func subscribe(c paho.Client) {
 	})
 
 	// 设备遗嘱消息（LWT）：thing/offline/{pk}/{dn}
-	// 设备连接时声明 LWT，TCP 断开后 EMQX 立即发布遗嘱，后端秒级感知离线
+	// 仅记录日志；状态以上下线 $SYS 事件为准（带时间戳可去重），
+	// LWT 无时间戳且与 $SYS disconnected 重复，参与状态处理会并发乱序覆盖新状态
 	c.Subscribe(TopicOffline+"+", QoS1, func(_ paho.Client, m paho.Message) {
 		parts := strings.Split(m.Topic(), "/")
 		// thing/offline/{pk}/{dn}
@@ -109,7 +110,6 @@ func subscribe(c paho.Client) {
 		}
 		clientID := parts[2] + "." + parts[3]
 		slog.Info("lwt offline detected", "device", clientID)
-		go service.HandleDeviceStatus(clientID, false)
 	})
 
 	// 子设备网关协议：thing/gateway/{pk}/{dn}/sub/{subId}/login|logout
@@ -130,6 +130,7 @@ func handleSysEvent(payload []byte, online bool) {
 	var evt struct {
 		ClientID string `json:"clientid"`
 		Username string `json:"username"`
+		Ts       int64  `json:"ts"`
 	}
 	if err := json.Unmarshal(payload, &evt); err != nil || evt.ClientID == "" {
 		return
@@ -138,7 +139,7 @@ func handleSysEvent(payload []byte, online bool) {
 	if evt.ClientID == config.C.MQTT.ClientID {
 		return
 	}
-	go service.HandleDeviceStatus(evt.ClientID, online)
+	service.QueueStatus(evt.ClientID, online, evt.Ts)
 }
 
 // PublishDown 向设备下行主题发布消息（QoS 1）

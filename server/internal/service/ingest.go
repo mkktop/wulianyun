@@ -230,7 +230,10 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 }
 
 // HandleDeviceStatus 处理上下线事件
-func HandleDeviceStatus(clientID string, online bool) {
+// evtTs 为事件时间戳（毫秒），0 表示不校验；校验避免 $SYS connected/disconnected
+// 事件经并发 goroutine 乱序处理时把新状态覆盖成旧状态。
+// 注意：须经 QueueStatus 入队串行处理以保持 EMQX 发布顺序，勿直接并发调用。
+func HandleDeviceStatus(clientID string, online bool, evtTs int64) {
 	productKey, deviceName, ok := ParseClientID(clientID)
 	if !ok {
 		return
@@ -239,14 +242,40 @@ func HandleDeviceStatus(clientID string, online bool) {
 	if err != nil {
 		return
 	}
+
+	// 陈旧事件保护：事件时间不晚于最近一次状态变更则忽略（FindDevice 有缓存，时间戳直查 DB）。
+	// 平局（evtTs == lastChange）偏好在线：同刻 disconnect 多来自被新会话接管的旧会话
+	if evtTs > 0 {
+		var lastChange int64
+		var fresh model.Device
+		if err := repository.DB.Select("last_online_at", "last_offline_at").
+			Where("id = ?", d.ID).First(&fresh).Error; err == nil {
+			if fresh.LastOnlineAt != nil && fresh.LastOnlineAt.UnixMilli() > lastChange {
+				lastChange = fresh.LastOnlineAt.UnixMilli()
+			}
+			if fresh.LastOfflineAt != nil && fresh.LastOfflineAt.UnixMilli() > lastChange {
+				lastChange = fresh.LastOfflineAt.UnixMilli()
+			}
+		}
+		if lastChange > 0 && (evtTs < lastChange || (!online && evtTs == lastChange)) {
+			slog.Debug("skip stale status event", "clientID", clientID, "online", online, "evtTs", evtTs, "lastChange", lastChange)
+			return
+		}
+	}
+
 	now := time.Now()
+	// 状态时间戳优先用事件时间（更准确；ts=0 的事件用处理时间）
+	ts := now
+	if evtTs > 0 {
+		ts = time.UnixMilli(evtTs)
+	}
 	status := model.DeviceStatusOffline
 	eventType := "offline"
-	updates := map[string]interface{}{"last_offline_at": now}
+	updates := map[string]interface{}{"last_offline_at": ts}
 	if online {
 		status = model.DeviceStatusOnline
 		eventType = "online"
-		updates = map[string]interface{}{"last_online_at": now}
+		updates = map[string]interface{}{"last_online_at": ts}
 	}
 	// 禁用设备不改状态（EMQX 鉴权阶段已拒绝，这里兜底）
 	if d.Status == model.DeviceStatusDisabled {
@@ -275,6 +304,31 @@ func HandleDeviceStatus(clientID string, online bool) {
 	for _, uid := range PushRecipients(d.UserID) {
 		ws.H.PushDeviceStatus(uid, d.ID, statusMsg)
 	}
+}
+
+// statusEvent 上下线事件
+type statusEvent struct {
+	clientID string
+	online   bool
+	evtTs    int64
+}
+
+var statusQueue = make(chan statusEvent, 512)
+
+func init() {
+	// 单 worker 按到达顺序串行处理状态事件：
+	// $SYS connected/disconnected 与 LWT 遗嘱事件并发 goroutine 处理会乱序，
+	// 导致新状态被旧事件覆盖（如 online 被随后处理的 offline 覆盖）
+	go func() {
+		for e := range statusQueue {
+			HandleDeviceStatus(e.clientID, e.online, e.evtTs)
+		}
+	}()
+}
+
+// QueueStatus 提交上下线事件（非阻塞入队，FIFO 串行处理）
+func QueueStatus(clientID string, online bool, evtTs int64) {
+	statusQueue <- statusEvent{clientID: clientID, online: online, evtTs: evtTs}
 }
 
 // GetLatest 读取设备最新遥测（Redis 缓存优先，回退数据库）

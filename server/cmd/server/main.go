@@ -105,6 +105,11 @@ func main() {
 		return mqtt.PublishBroadcast(productKey, payload)
 	}
 
+	// 影子期望值 retained 下发（设备订阅时必达；空 payload 清除）
+	service.DownRetainedPublisher = func(productKey, deviceName string, payload []byte) error {
+		return mqtt.PublishDownRetained(productKey, deviceName, payload)
+	}
+
 	// 离线告警巡检
 	rule.StartOfflineChecker()
 

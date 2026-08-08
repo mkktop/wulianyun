@@ -59,7 +59,7 @@ func ConnectSimulator(c *gin.Context) {
 	simMu.Unlock()
 
 	clientID := fmt.Sprintf("%s.%s", p.ProductKey, d.Name)
-	go service.HandleDeviceStatus(clientID, true)
+	service.QueueStatus(clientID, true, 0)
 	OK(c, sess)
 }
 
@@ -101,7 +101,7 @@ func DisconnectSimulator(c *gin.Context) {
 	simMu.Unlock()
 	if ok {
 		clientID := fmt.Sprintf("%s.%s", sess.ProductKey, sess.DeviceName)
-		go service.HandleDeviceStatus(clientID, false)
+		service.QueueStatus(clientID, false, 0)
 	}
 	OK(c, nil)
 }

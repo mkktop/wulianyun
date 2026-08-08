@@ -13,6 +13,9 @@ import (
 // DownPublisher 由 mqtt 包注入，避免循环依赖
 var DownPublisher func(productKey, deviceName string, payload []byte) error
 
+// DownRetainedPublisher 发布 Retained 期望值（设备订阅时必达）；payload 为空表示清除
+var DownRetainedPublisher func(productKey, deviceName string, payload []byte) error
+
 // GetShadow 获取设备影子（无则初始化）
 func GetShadow(deviceID uint) *model.DeviceShadow {
 	if s := CachedGetShadow(deviceID); s != nil {
@@ -48,6 +51,8 @@ func UpdateShadowDesired(d *model.Device, desired map[string]interface{}) (*mode
 		})
 		s.Desired = data
 		s.Version++
+		// retained 同步：无论设备在线与否都刷新，设备下次订阅必然拿到
+		pushDesiredRetained(d, merged)
 		if d.Status == model.DeviceStatusOnline {
 			delta := computeDelta(oldDesired, merged)
 			if len(delta) > 0 {
@@ -73,6 +78,9 @@ func UpdateShadowDesired(d *model.Device, desired map[string]interface{}) (*mode
 	s.Version++
 	entry.dirty = true
 	entry.mu.Unlock()
+
+	// retained 同步：无论设备在线与否都刷新，设备下次订阅必然拿到
+	pushDesiredRetained(d, merged)
 
 	// 立即刷盘（不等定时 flush）
 	shadowFlushAll()
@@ -123,6 +131,8 @@ func mergeShadowReported(d *model.Device, data map[string]interface{}) {
 		if changed {
 			db, _ := json.Marshal(desired)
 			updates["desired"] = db
+			// 期望达成：刷新 retained（剩余期望或清除）
+			pushDesiredRetained(d, desired)
 		}
 		repository.DB.Model(s).Updates(updates)
 		return
@@ -153,15 +163,20 @@ func mergeShadowReported(d *model.Device, data map[string]interface{}) {
 	}
 	entry.dirty = true
 	entry.mu.Unlock()
+	if changed {
+		// 期望达成：刷新 retained（剩余期望或清除）
+		pushDesiredRetained(d, desired)
+	}
 }
 
-// syncShadowOnConnect 设备上线时补发未达成的期望值
+// syncShadowOnConnect 设备上线时补发未达成的期望值（普通下发 + retained 兜底）
 func syncShadowOnConnect(d *model.Device) {
 	s := GetShadow(d.ID)
 	desired := map[string]interface{}{}
 	json.Unmarshal(s.Desired, &desired)
 	if len(desired) > 0 {
 		pushDesired(d, desired)
+		pushDesiredRetained(d, desired)
 	}
 }
 
@@ -177,6 +192,27 @@ func pushDesired(d *model.Device, desired map[string]interface{}) {
 	})
 	if err := DownPublisher(d.ProductKey, d.Name, msg); err != nil {
 		slog.Warn("push shadow desired failed", "device", d.Name, "err", err)
+	}
+}
+
+// pushDesiredRetained 把当前期望值发布为 Retained 消息：设备订阅完成时由 broker 直接送达，
+// 规避"重连瞬间普通下行早于订阅被丢弃"的竞态；desired 为空时发布空 payload 清除 retained
+func pushDesiredRetained(d *model.Device, desired map[string]interface{}) {
+	if DownRetainedPublisher == nil {
+		return
+	}
+	var payload []byte
+	if len(desired) > 0 {
+		msg, _ := json.Marshal(map[string]interface{}{
+			"method": "property.set",
+			"params": desired,
+			"delta":  true,
+			"ts":     time.Now().UnixMilli(),
+		})
+		payload = msg
+	}
+	if err := DownRetainedPublisher(d.ProductKey, d.Name, payload); err != nil {
+		slog.Warn("push shadow desired retained failed", "device", d.Name, "err", err)
 	}
 }
 
