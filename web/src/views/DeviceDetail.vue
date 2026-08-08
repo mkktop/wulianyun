@@ -77,20 +77,13 @@
                 style="width: 120px"
               />
               <el-input v-else v-model="propInputs[p.identifier]" style="width: 120px" />
+              <el-tag :type="desiredState(p).type" size="small">{{ desiredState(p).text }}</el-tag>
               <el-button size="small" type="primary" :loading="settingProp" @click="setModelProp(p)">设置</el-button>
             </div>
           </template>
           <el-empty v-else-if="!viewOnly" description="产品未定义可写属性，请先在产品管理中配置物模型" :image-size="60" />
           <el-divider style="margin: 12px 0" />
-          <el-descriptions :column="1" border size="small">
-            <el-descriptions-item label="期望值 desired">
-              <el-text size="small">{{ shadowDesiredText }}</el-text>
-            </el-descriptions-item>
-            <el-descriptions-item label="上报值 reported">
-              <el-text size="small">{{ shadowReportedText }}</el-text>
-            </el-descriptions-item>
-          </el-descriptions>
-          <el-text type="info" size="small">离线设备写入影子，上线后自动补发</el-text>
+          <el-text type="info" size="small">离线设备写入影子，上线后自动补发；期望达成后自动清除</el-text>
         </el-card>
 
         <!-- 物模型服务调用 -->
@@ -164,12 +157,22 @@
             </el-select>
           </div>
           <el-table :data="logs" v-loading="logsLoading" size="small" stripe>
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <pre class="log-payload">{{ prettyPayload(row.payload) }}</pre>
+              </template>
+            </el-table-column>
             <el-table-column label="分类" width="110">
               <template #default="{ row }">
                 <el-tag size="small" :type="logCategoryType(row.category)">{{ logCategoryText(row.category) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="summary" label="摘要" min-width="300" show-overflow-tooltip />
+            <el-table-column prop="summary" label="摘要" min-width="240" show-overflow-tooltip />
+            <el-table-column label="数据" min-width="220">
+              <template #default="{ row }">
+                <el-text size="small" class="payload-preview">{{ row.payload || '-' }}</el-text>
+              </template>
+            </el-table-column>
             <el-table-column label="时间" width="170">
               <template #default="{ row }">{{ fmt(row.createdAt) }}</template>
             </el-table-column>
@@ -278,8 +281,21 @@ const chartEls = new Map<string, HTMLElement>()
 const charts = new Map<string, echarts.ECharts>()
 const palette = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#9b59b6', '#16a085', '#e67e22', '#2c8fbf']
 
-const shadowDesiredText = computed(() => jsonText(shadow.value?.desired))
-const shadowReportedText = computed(() => jsonText(shadow.value?.reported))
+// 最近设置过的属性（来自命令日志，用于区分"已达成/未设置"）
+const setProps = ref<Set<string>>(new Set())
+
+// 每个可写属性的期望设置状态：未达成（desired 有值）/ 已达成（设置过且 desired 已清）/ 未设置
+function desiredState(p: TslProperty) {
+  const desired = shadow.value?.desired
+  const obj = desired ? (typeof desired === 'string' ? JSON.parse(desired) : desired) : {}
+  if (obj[p.identifier] !== undefined) {
+    return { type: 'warning', text: `期望 ${obj[p.identifier]}（未达成）` }
+  }
+  if (setProps.value.has(p.identifier)) {
+    return { type: 'success', text: '已达成' }
+  }
+  return { type: 'info', text: '未设置' }
+}
 
 function propLabel(key: string) {
   return propMeta.value[key]?.name || key
@@ -288,14 +304,31 @@ function propUnit(key: string) {
   return propMeta.value[key]?.unit || ''
 }
 
-function jsonText(v: any) {
-  if (!v) return '{}'
-  const obj = typeof v === 'string' ? JSON.parse(v) : v
-  return JSON.stringify(obj)
-}
-
 async function loadShadow() {
   shadow.value = await api.getShadow(id)
+  // 从命令日志提取最近设置过的属性（判断"已达成/未设置"）
+  try {
+    const cmds = await api.listCommandLogs({ deviceId: id, size: 30 })
+    const s = new Set<string>()
+    for (const c of (cmds.list || [])) {
+      const p = JSON.parse(c.payload || '{}')
+      if (p.method === 'property.set' && p.params) {
+        for (const k of Object.keys(p.params)) s.add(k)
+      }
+    }
+    setProps.value = s
+  } catch {
+    /* 命令日志不可用时不阻塞影子加载 */
+  }
+}
+
+function prettyPayload(v: string | null) {
+  if (!v) return '-'
+  try {
+    return JSON.stringify(JSON.parse(v), null, 2)
+  } catch {
+    return v
+  }
 }
 
 async function loadThingModel(productId: number) {
@@ -534,6 +567,7 @@ onMounted(async () => {
   await load()
   loadHistory()
   loadShadow()
+  loadLogs()
   loadSubDevices()
   realtime.on(onMsg)
   realtime.subscribe(id)
@@ -569,4 +603,26 @@ onUnmounted(() => {
 .svc-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .toolbar { display: flex; justify-content: space-between; margin-bottom: 12px; }
 .pager { margin-top: 12px; justify-content: flex-end; }
+.payload-preview {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  color: #606266;
+}
+.log-payload {
+  margin: 0;
+  padding: 10px 14px;
+  background: #f7f9fc;
+  border-radius: 6px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #303133;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
 </style>
