@@ -592,7 +592,10 @@ function renderField(field: string, index: number) {
       name: propLabel(field), type: 'line', showSymbol: false, smooth: true,
       lineStyle: { color, width: 2 },
       areaStyle: { color, opacity: 0.08 },
-      data: series.get(field)
+      // 大数据降采样（24h 上万点）避免每包新数据全量重绘卡顿
+      sampling: 'lttb',
+      // 拷贝出新数组：规避 ECharts 同一引用不更新数据的已知问题
+      data: series.get(field)!.slice()
     }]
   }, { notMerge: true })
 }
@@ -641,6 +644,8 @@ function onMsg(msg: any) {
         hasNew = true
       }
       series.get(k)!.push([msg.payload.ts, v])
+      // 长时间挂页面时裁剪，防止 series 无限增长
+      if (series.get(k)!.length > 50000) series.get(k)!.splice(0, series.get(k)!.length - 50000)
     }
     if (hasNew) {
       // 新字段需先同步图表容器，再在下一帧渲染
