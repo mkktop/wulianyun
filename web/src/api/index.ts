@@ -24,6 +24,8 @@ http.interceptors.request.use((config) => {
 http.interceptors.response.use(
   (resp) => {
     if (resp.config) pending.delete(reqKey(resp.config.method || 'get', resp.config.url, resp.config.params))
+    // Blob 响应（文件下载）直接返回，不做 JSON 解包
+    if (resp.data instanceof Blob) return resp.data
     const { code, msg, data } = resp.data
     if (code !== 0) {
       ElMessage.error(msg || '请求失败')
@@ -397,6 +399,9 @@ export const api = {
     list: (deviceId: number, params: any) => http.get(`/devices/${deviceId}/logs`, { params }),
     listAll: (params: any) => http.get('/device-logs', { params }),
   },
+  // 导出历史数据 CSV（按时间范围 + 参数过滤）
+  exportHistory: (id: number | string, params: any) =>
+    http.get(`/devices/${id}/export`, { params, responseType: 'blob' }) as Promise<Blob>,
   // MQTT 调试台（WebSocket 直连，此处仅保留占位）
   mqttDebug: {
     wsUrl: '/api/v1/mqtt-debug/ws',

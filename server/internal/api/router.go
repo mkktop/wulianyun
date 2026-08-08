@@ -64,6 +64,7 @@ func NewRouter() *gin.Engine {
 			auth.GET("/devices/:id/events", ListDeviceEvents)
 			auth.GET("/devices/:id/latest", DeviceLatest)
 			auth.GET("/devices/:id/history", DeviceHistory)
+			auth.GET("/devices/:id/export", ExportDeviceHistory)
 			auth.GET("/devices/:id/shadow", GetDeviceShadow)
 
 			auth.GET("/rules", ListRules)

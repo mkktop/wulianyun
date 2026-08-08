@@ -129,6 +129,7 @@
                   :shortcuts="dateShortcuts"
                   @change="loadHistory"
                 />
+                <el-button size="small" type="primary" plain @click="openExport">导出</el-button>
               </div>
             </div>
           </template>
@@ -227,6 +228,28 @@
       </el-tab-pane>
     </el-tabs>
 
+    <!-- 导出历史数据对话框 -->
+    <el-dialog v-model="showExport" title="导出历史数据" width="480px">
+      <el-form label-width="80px">
+        <el-form-item label="时间范围">
+          <el-date-picker
+            v-model="exportRange" type="datetimerange" range-separator="至"
+            start-placeholder="开始时间" end-placeholder="结束时间" :shortcuts="dateShortcuts"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="导出参数">
+          <el-checkbox-group v-model="exportFields">
+            <el-checkbox v-for="p in properties" :key="p.identifier" :value="p.identifier">{{ p.name }}</el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showExport = false">取消</el-button>
+        <el-button type="primary" :loading="exporting" @click="doExport">导出 CSV</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 添加子设备对话框 -->
     <el-dialog v-model="showAddSub" title="添加子设备" width="400px">
       <el-form label-width="80px">
@@ -278,6 +301,67 @@ const dateShortcuts = [
 function onRangeChange() {
   customRange.value = null
   loadHistory()
+}
+
+// ===== 历史数据导出 =====
+const showExport = ref(false)
+const exportRange = ref<[Date, Date] | null>(null)
+const exportFields = ref<string[]>([])
+const exporting = ref(false)
+
+// 打开导出对话框：默认时间范围取当前曲线范围，默认参数全选
+function openExport() {
+  let end = Date.now()
+  let start = end - range.value * 3600 * 1000
+  if (customRange.value?.[0] && customRange.value?.[1]) {
+    start = customRange.value[0].getTime()
+    end = customRange.value[1].getTime()
+  }
+  exportRange.value = [new Date(start), new Date(end)]
+  exportFields.value = properties.value.map((p) => p.identifier)
+  showExport.value = true
+}
+
+async function doExport() {
+  if (!exportRange.value?.[0] || !exportRange.value?.[1]) {
+    ElMessage.warning('请选择时间范围')
+    return
+  }
+  if (!exportFields.value.length) {
+    ElMessage.warning('请至少选择一个参数')
+    return
+  }
+  exporting.value = true
+  try {
+    const blob = await api.exportHistory(id, {
+      start: exportRange.value[0].getTime(),
+      end: exportRange.value[1].getTime(),
+      fields: exportFields.value.join(','),
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `history_${device.value?.name || id}_${Date.now()}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+    showExport.value = false
+  } catch (e: any) {
+    // Blob 错误响应：后端返回 JSON（code!=0），解析出提示
+    if (e?.response?.data instanceof Blob) {
+      const text = await e.response.data.text()
+      try {
+        const j = JSON.parse(text)
+        ElMessage.error(j.msg || '导出失败')
+        return
+      } catch {
+        /* 非 JSON 错误体，走通用提示 */
+      }
+    }
+    ElMessage.error(e?.message || '导出失败')
+  } finally {
+    exporting.value = false
+  }
 }
 const shadow = ref<any>(null)
 const settingProp = ref(false)
