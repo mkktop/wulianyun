@@ -113,11 +113,23 @@
           <template #header>
             <div class="card-head">
               <span>历史曲线（每个变量独立图表）</span>
-              <el-radio-group v-model="range" size="small" @change="loadHistory">
-                <el-radio-button :value="1">1小时</el-radio-button>
-                <el-radio-button :value="6">6小时</el-radio-button>
-                <el-radio-button :value="24">24小时</el-radio-button>
-              </el-radio-group>
+              <div class="curve-tools">
+                <el-radio-group v-model="range" size="small" @change="onRangeChange">
+                  <el-radio-button :value="1">1小时</el-radio-button>
+                  <el-radio-button :value="6">6小时</el-radio-button>
+                  <el-radio-button :value="24">24小时</el-radio-button>
+                </el-radio-group>
+                <el-date-picker
+                  v-model="customRange"
+                  type="datetimerange"
+                  size="small"
+                  range-separator="至"
+                  start-placeholder="开始时间"
+                  end-placeholder="结束时间"
+                  :shortcuts="dateShortcuts"
+                  @change="loadHistory"
+                />
+              </div>
             </div>
           </template>
           <el-empty v-if="!fields.length" description="暂无数值型数据" :image-size="80" />
@@ -251,6 +263,22 @@ const command = ref('')
 const sending = ref(false)
 const secretVisible = ref(false)
 const range = ref(1)
+const customRange = ref<[Date, Date] | null>(null)
+
+// 日期选择器快捷选项
+const dateShortcuts = [
+  { text: '最近1小时', value: () => [new Date(Date.now() - 3600 * 1000), new Date()] },
+  { text: '最近6小时', value: () => [new Date(Date.now() - 6 * 3600 * 1000), new Date()] },
+  { text: '最近24小时', value: () => [new Date(Date.now() - 24 * 3600 * 1000), new Date()] },
+  { text: '今天', value: () => { const d = new Date(); d.setHours(0, 0, 0, 0); return [d, new Date()] } },
+  { text: '昨天', value: () => { const s = new Date(); s.setDate(s.getDate() - 1); s.setHours(0, 0, 0, 0); const e = new Date(); e.setDate(e.getDate() - 1); e.setHours(23, 59, 59, 999); return [s, e] } },
+]
+
+// 快捷范围切换：清空自定义时间，回到快捷窗口
+function onRangeChange() {
+  customRange.value = null
+  loadHistory()
+}
 const shadow = ref<any>(null)
 const settingProp = ref(false)
 const invoking = ref('')
@@ -405,9 +433,14 @@ async function load() {
 }
 
 async function loadHistory() {
-  const end = Date.now()
-  const start = end - range.value * 3600 * 1000
-  const points = await api.deviceHistory(id, { start, end })
+  let end = Date.now()
+  let start = end - range.value * 3600 * 1000
+  // 自定义时间范围优先（radio 快捷按钮与日期选择互斥：切换 radio 会清空自定义范围）
+  if (customRange.value?.[0] && customRange.value?.[1]) {
+    start = customRange.value[0].getTime()
+    end = customRange.value[1].getTime()
+  }
+  const points = await api.deviceHistory(id, { start, end, limit: 5000 })
   series.clear()
   for (const p of points) {
     for (const [k, v] of Object.entries(p.data)) {
@@ -622,7 +655,8 @@ onUnmounted(() => {
 .head { display: flex; justify-content: space-between; align-items: flex-start; }
 .head h3 { display: flex; align-items: center; }
 .sub { color: #999; font-size: 13px; margin-top: 6px; }
-.card-head { display: flex; justify-content: space-between; align-items: center; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.curve-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .metric { background: #f7f9fc; border-radius: 8px; padding: 12px 16px; }
 .metric-name { color: #999; font-size: 13px; }
