@@ -350,8 +350,14 @@ func init() {
 }
 
 // QueueStatus 提交上下线事件（非阻塞入队，FIFO 串行处理）
+// 队列满时丢弃并告警：状态事件可降级（后续心跳/连接事件会再触发），
+// 绝不能阻塞调用方——$SYS 回调在 paho 单分发协程上，阻塞会卡死全平台 MQTT 上行
 func QueueStatus(clientID string, online bool, evtTs int64) {
-	statusQueue <- statusEvent{clientID: clientID, online: online, evtTs: evtTs}
+	select {
+	case statusQueue <- statusEvent{clientID: clientID, online: online, evtTs: evtTs}:
+	default:
+		slog.Warn("status queue full, drop event", "clientID", clientID, "online", online)
+	}
 }
 
 // GetLatest 读取设备最新遥测（Redis 缓存优先，回退数据库）

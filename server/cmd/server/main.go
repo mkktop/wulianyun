@@ -78,7 +78,10 @@ func main() {
 	// Modbus 云端轮询引擎（注册 gateway 上下线钩子）
 	poller.Init()
 
-	// 下行分发：Modbus 产品走点位写入，其他 TCP 在线设备走网关透传，否则走 EMQX；统一记录下发日志
+	// 下行分发：本实例 TCP 连接（Modbus 点位写入 / 网关透传）→ 直发；
+	// 无本实例连接时按产品协议分流：TCP 设备走 Redis 扇出（其他实例的 gateway 投递），
+	// MQTT 设备走 EMQX；统一记录下发日志
+	service.DownLocal = gateway.Send
 	service.DownPublisher = func(productKey, deviceName string, payload []byte) error {
 		var err error
 		channel := "mqtt"
@@ -93,16 +96,30 @@ func main() {
 				err = gateway.Send(productKey, deviceName, payload)
 			}
 		} else {
-			err = mqtt.PublishDown(productKey, deviceName, payload)
+			// 无本实例 TCP 连接：按产品协议分流
+			var p model.Product
+			if repository.DB.Select("protocol").Where("product_key = ?", productKey).First(&p).Error == nil &&
+				p.Protocol == "tcp" {
+				// TCP/DTU 设备（可能连接在其他实例）：Redis 扇出
+				channel = "tcp"
+				err = service.PublishDown(productKey, deviceName, payload)
+			} else {
+				// MQTT 设备：EMQX 下发
+				err = mqtt.PublishDown(productKey, deviceName, payload)
+			}
 		}
 		go service.LogCommand(productKey, deviceName, channel, payload, err)
 		return err
 	}
 
-	// 广播分发：TCP 在线设备逐连接下发 + MQTT 广播主题
+	// 广播分发：TCP 在线设备逐连接下发（codec 编码）+ MQTT 广播主题
 	service.Broadcaster = func(productKey string, payload []byte) error {
-		gateway.Broadcast(productKey, payload)
-		return mqtt.PublishBroadcast(productKey, payload)
+		tcpErr := gateway.Broadcast(productKey, payload)
+		mqttErr := mqtt.PublishBroadcast(productKey, payload)
+		if tcpErr != nil {
+			return tcpErr
+		}
+		return mqttErr
 	}
 
 	// 影子期望值 retained 下发（设备订阅时必达；空 payload 清除）

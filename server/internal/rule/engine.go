@@ -469,7 +469,15 @@ func toFloat(v interface{}) (float64, bool) {
 	return 0, false
 }
 
-// validateWebhookURL 基础 SSRF 防护：仅允许 http/https，禁止回环与云元数据地址
+// isBlockedIP SSRF 黑名单：私网/回环/链路本地/未指定/多播/云元数据地址一律拒绝
+func isBlockedIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() || ip.IsMulticast() || ip.IsPrivate() ||
+		ip.Equal(net.ParseIP("169.254.169.254"))
+}
+
+// validateWebhookURL SSRF 防护：仅允许 http/https，禁止回环与云元数据地址。
+// 域名不在此解析（防 DNS 重绑定），由 newSafeHTTPClient 的 DialContext 解析后拦截
 func validateWebhookURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -479,13 +487,50 @@ func validateWebhookURL(raw string) error {
 		return fmt.Errorf("仅支持 http/https")
 	}
 	host := u.Hostname()
-	if host == "localhost" || host == "169.254.169.254" {
+	if host == "localhost" {
 		return fmt.Errorf("目标地址不允许")
 	}
-	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsLinkLocalUnicast()) {
+	if ip := net.ParseIP(host); ip != nil && isBlockedIP(ip) {
 		return fmt.Errorf("目标地址不允许")
 	}
 	return nil
+}
+
+// newSafeHTTPClient 构造带 SSRF 防护的 HTTP 客户端：
+// 1) 重定向时对每个 Location 重新校验（默认 Client 会跟随 10 次重定向，绕过 URL 校验）；
+// 2) 自定义 DialContext 在连接前解析目标 IP 并校验（防 DNS 重绑定）
+func newSafeHTTPClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if err := validateWebhookURL(req.URL.String()); err != nil {
+				return fmt.Errorf("重定向目标被拒绝: %w", err)
+			}
+			if len(via) >= 5 {
+				return fmt.Errorf("重定向次数过多")
+			}
+			return nil
+		},
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				host, _, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+				if err != nil {
+					return nil, err
+				}
+				for _, ip := range ips {
+					if isBlockedIP(ip.IP) {
+						return nil, fmt.Errorf("目标地址不允许: %s", ip.IP)
+					}
+				}
+				return dialer.DialContext(ctx, network, addr)
+			},
+		},
+	}
 }
 
 func postJSONWithRetry(rawURL string, body interface{}, maxRetries int) {
@@ -517,7 +562,7 @@ func postJSONWithRetry(rawURL string, body interface{}, maxRetries int) {
 
 func doPostJSON(rawURL string, body interface{}) error {
 	data, _ := json.Marshal(body)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newSafeHTTPClient()
 	resp, err := client.Post(rawURL, "application/json", bytes.NewReader(data))
 	if err != nil {
 		return err

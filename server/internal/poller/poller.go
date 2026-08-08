@@ -194,10 +194,15 @@ func pollGroup(p *model.Product, deviceName string, g groupPlan) {
 	if rdb != nil {
 		ctx := context.Background()
 		ok, err := rdb.SetNX(ctx, lockKey, "1", 60*time.Second).Result()
-		if err != nil || !ok {
+		if err != nil {
+			// Redis 抖动/不可用：告警并降级为单实例轮询。
+			// 直接 return 会导致该设备组所有采集停止（违反"Redis 不可用降级"约定）
+			slog.Warn("poller lock error, degrade to single-instance polling", "key", lockKey, "err", err)
+		} else if !ok {
 			return // 其他实例正在采集，跳过
+		} else {
+			defer rdb.Del(ctx, lockKey)
 		}
-		defer rdb.Del(ctx, lockKey)
 	}
 
 	// 获取信号量
@@ -304,7 +309,7 @@ func WriteProperty(productKey, deviceName string, payload []byte) error {
 		if !ok || pt.AccessMode != "rw" {
 			continue
 		}
-		writeFn := writeFuncFor(pt.FunctionCode)
+		writeFn := writeFuncFor(pt.FunctionCode, pt.RawType)
 		if writeFn == 0 {
 			lastErr = fmt.Errorf("点位 %s 不可写", k)
 			continue
@@ -330,11 +335,16 @@ func WriteProperty(productKey, deviceName string, payload []byte) error {
 }
 
 // writeFuncFor 由读功能码推导写功能码；离散量输入/输入寄存器只读返回 0
-func writeFuncFor(fn int) int {
+func writeFuncFor(fn int, rawType string) int {
 	switch fn {
 	case model.FuncReadCoils:
 		return model.FuncWriteSingleCoil
 	case model.FuncReadHoldingRegisters:
+		// 32-bit 点位（int32/uint32/float，占 2 寄存器）必须用 FC16 多寄存器写，
+		// FC6 单寄存器写会丢弃高字、第二寄存器不动，静默截断数值
+		if rawType == "int32" || rawType == "uint32" || rawType == "float" {
+			return model.FuncWriteMultipleRegs
+		}
 		return model.FuncWriteSingleRegister
 	case model.FuncWriteSingleCoil, model.FuncWriteSingleRegister,
 		model.FuncWriteMultipleCoils, model.FuncWriteMultipleRegs:

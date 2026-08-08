@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/hex"
+	"log/slog"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"iot-platform/internal/modbus"
 	"iot-platform/internal/model"
@@ -86,10 +88,20 @@ func SaveModbusPoints(c *gin.Context) {
 			SwapByte: r.SwapByte, SwapWord: r.SwapWord, AccessMode: r.AccessMode, Unit: r.Unit,
 		})
 	}
-	// 事务覆盖
-	repository.DB.Where("product_id = ?", p.ID).Delete(&model.ModbusPoint{})
-	if len(points) > 0 {
-		repository.DB.Create(&points)
+	// 事务覆盖：Delete + Create 必须原子，否则 Create 失败时点位表已被清空（静默全量丢点）
+	err = repository.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("product_id = ?", p.ID).Delete(&model.ModbusPoint{}).Error; err != nil {
+			return err
+		}
+		if len(points) > 0 {
+			return tx.Create(&points).Error
+		}
+		return nil
+	})
+	if err != nil {
+		slog.Error("save modbus points failed", "productId", p.ID, "err", err)
+		Fail(c, 500, "保存点位失败")
+		return
 	}
 	OK(c, points)
 }

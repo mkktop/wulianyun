@@ -427,18 +427,29 @@ func Send(productKey, deviceName string, payload []byte) error {
 	return err
 }
 
-// Broadcast 向某产品下所有在线 TCP 设备下发原始 payload（用于广播/配置下发）
-func Broadcast(productKey string, payload []byte) {
+// Broadcast 向某产品下所有在线 TCP 设备下发（复用 Send 的 codec 编码逻辑，收集写错误）
+func Broadcast(productKey string, payload []byte) error {
 	mu.RLock()
-	defer mu.RUnlock()
+	var targets []string
 	prefix := productKey + "."
-	for key, s := range sessions {
-		if !strings.HasPrefix(key, prefix) {
-			continue
+	for key := range sessions {
+		if strings.HasPrefix(key, prefix) {
+			targets = append(targets, key)
 		}
-		s.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		s.conn.Write(payload)
 	}
+	mu.RUnlock()
+
+	var errs []string
+	for _, key := range targets {
+		dn := strings.TrimPrefix(key, prefix)
+		if err := Send(productKey, dn, payload); err != nil {
+			errs = append(errs, dn+": "+err.Error())
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("broadcast partial failure: %s", strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // Request 发送请求帧并等待应答（Modbus 半双工请求-响应），带超时；同一连接上串行执行

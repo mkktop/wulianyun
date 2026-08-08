@@ -29,6 +29,7 @@ type Client struct {
 	conn      *websocket.Conn
 	userID    uint
 	send      chan []byte
+	done      chan struct{} // 连接关闭信号，广播发送 select 保护
 	deviceIDs map[uint]bool // 订阅的设备，空表示只收全局事件
 	mu        sync.RWMutex
 }
@@ -84,7 +85,7 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, userID uint) {
 		slog.Warn("ws upgrade failed", "err", err)
 		return
 	}
-	c := &Client{conn: conn, userID: userID, send: make(chan []byte, 64), deviceIDs: map[uint]bool{}}
+	c := &Client{conn: conn, userID: userID, send: make(chan []byte, 64), done: make(chan struct{}), deviceIDs: map[uint]bool{}}
 	h.mu.Lock()
 	if h.clients[c.userID] == nil {
 		h.clients[c.userID] = map[*Client]bool{}
@@ -106,6 +107,8 @@ func (c *Client) readLoop(h *Hub) {
 			}
 		}
 		h.mu.Unlock()
+		// 先关 done 再关 send：广播发送的 select 会优先命中 done，避免 send-on-closed panic
+		close(c.done)
 		close(c.send)
 		c.conn.Close()
 	}()
@@ -180,10 +183,10 @@ func (h *Hub) push(userID uint, onlyDevice *uint, msg OutMsg) {
 
 // localPush 仅推送给本实例的 WebSocket 客户端
 func (h *Hub) localPush(userID uint, onlyDevice *uint, data []byte) {
+	// 全程持 RLock 遍历：readLoop 在锁内 delete 客户端，锁外遍历会并发 map 读写崩溃
 	h.mu.RLock()
-	userClients := h.clients[userID]
-	h.mu.RUnlock()
-	for c := range userClients {
+	defer h.mu.RUnlock()
+	for c := range h.clients[userID] {
 		if onlyDevice != nil {
 			c.mu.RLock()
 			sub := c.deviceIDs[*onlyDevice]
@@ -194,6 +197,7 @@ func (h *Hub) localPush(userID uint, onlyDevice *uint, data []byte) {
 		}
 		select {
 		case c.send <- data:
+		case <-c.done: // 连接已关闭，跳过
 		default: // 队列满丢弃，避免阻塞
 		}
 	}
