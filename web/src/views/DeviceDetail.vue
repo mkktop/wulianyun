@@ -63,8 +63,10 @@
           <template v-if="!viewOnly && writableProps.length">
             <div v-for="p in writableProps" :key="p.identifier" class="prop-row">
               <div class="prop-info">
-                <span class="prop-name">{{ p.name }}</span>
-                <el-text type="info" size="small">{{ p.identifier }}{{ p.unit ? ' · ' + p.unit : '' }}</el-text>
+                <span class="prop-name">
+                  {{ p.name }}
+                  <el-text v-if="propRange(p)" type="info" size="small">（{{ propRange(p) }}）</el-text>
+                </span>
               </div>
               <el-switch v-if="p.dataType === 'bool'" v-model="propInputs[p.identifier]" />
               <el-select v-else-if="p.dataType === 'enum'" v-model="propInputs[p.identifier]" style="width: 120px">
@@ -283,6 +285,20 @@ const palette = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#9b59b6', '#16a085
 
 // 最近设置过的属性（来自命令日志，用于区分"已达成/未设置"）
 const setProps = ref<Set<string>>(new Set())
+
+// 每个可写属性的可设置范围文本（bool 0/1、enum 枚举、数值 min~max），text 无范围返回空
+function propRange(p: TslProperty) {
+  if (p.dataType === 'bool') return '0/1'
+  if (p.dataType === 'enum') return (p.enumSpec || []).map((e: any) => e.label || e.value).join('/')
+  if (p.dataType === 'int32' || p.dataType === 'float' || p.dataType === 'double') {
+    const u = p.unit || ''
+    if (p.min != null && p.max != null) return `${p.min} ~ ${p.max}${u}`
+    if (p.min != null) return `≥ ${p.min}${u}`
+    if (p.max != null) return `≤ ${p.max}${u}`
+    return u ? `数值${u}` : ''
+  }
+  return ''
+}
 
 // 每个可写属性的期望设置状态：未达成（desired 有值）/ 已达成（设置过且 desired 已清）/ 未设置
 function desiredState(p: TslProperty) {
