@@ -173,22 +173,41 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	}
 	t2 := time.Now()
 
+	// 最新值白名单：有物模型时只合并已定义属性，未定义字段（如指令应答 messageId/code）
+	// 不进入实时数据/影子/规则，避免污染设备最新值（轨迹与设备日志仍保留原始 payload）
+	mergeData := data
+	if props, err := LoadThingModelProps(d.ProductID); err == nil && len(props) > 0 {
+		allowed := make(map[string]bool, len(props))
+		for _, p := range props {
+			if id, ok := p["identifier"].(string); ok {
+				allowed[id] = true
+			}
+		}
+		filtered := make(map[string]interface{}, len(data))
+		for k, v := range data {
+			if allowed[k] {
+				filtered[k] = v
+			}
+		}
+		mergeData = filtered
+	}
+
 	// 最新值缓存：按属性合并（Redis Lua 原子操作，避免竞态）
-	mergePayload, _ := json.Marshal(data)
+	mergePayload, _ := json.Marshal(mergeData)
 	mergeLatestScript.Run(context.Background(), repository.RDB,
 		[]string{latestKey(d.ID)},
 		string(mergePayload), fmt.Sprintf("%d", now.UnixMilli()),
 	)
 
 	// 实时推送：设备归属者 + 其一级父账号（一级实时看二级设备曲线）
-	telemetryMsg := map[string]interface{}{"ts": now.UnixMilli(), "data": data}
+	telemetryMsg := map[string]interface{}{"ts": now.UnixMilli(), "data": mergeData}
 	for _, uid := range PushRecipients(d.UserID) {
 		ws.H.PushTelemetry(uid, d.ID, telemetryMsg)
 	}
 
 	// 同步设备影子 reported + 规则引擎评估
-	mergeShadowReported(d, data)
-	rule.EvalTelemetry(d, data)
+	mergeShadowReported(d, mergeData)
+	rule.EvalTelemetry(d, mergeData)
 	t3 := time.Now()
 
 	// 异步写入消息轨迹

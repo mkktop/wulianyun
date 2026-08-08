@@ -8,22 +8,27 @@ import (
 	"iot-platform/internal/repository"
 )
 
+// LoadThingModelProps 加载产品物模型属性定义；无物模型或解析失败时返回错误
+func LoadThingModelProps(productID uint) ([]map[string]interface{}, error) {
+	var tm model.ThingModel
+	if err := repository.DB.Where("product_id = ?", productID).First(&tm).Error; err != nil {
+		return nil, err
+	}
+	var props []map[string]interface{}
+	if len(tm.Properties) > 0 {
+		if err := json.Unmarshal(tm.Properties, &props); err != nil {
+			return nil, err
+		}
+	}
+	return props, nil
+}
+
 // ValidateTelemetry 按产品物模型校验上行遥测数据
 // 返回 (是否全部合法, 错误列表)
 func ValidateTelemetry(productID uint, data map[string]interface{}) (bool, []string) {
-	// 加载产品物模型
-	var tm model.ThingModel
-	if err := repository.DB.Where("product_id = ?", productID).First(&tm).Error; err != nil {
+	props, err := LoadThingModelProps(productID)
+	if err != nil || len(props) == 0 {
 		return true, nil // 无物模型定义，放行
-	}
-
-	// 解析 properties 定义
-	var props []map[string]interface{}
-	if len(tm.Properties) > 0 {
-		json.Unmarshal(tm.Properties, &props)
-	}
-	if len(props) == 0 {
-		return true, nil
 	}
 
 	// 建立属性定义映射

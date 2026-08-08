@@ -16,7 +16,7 @@ type MessageTrace struct {
 	Topic      string    `gorm:"size:255" json:"topic"`
 	Payload    string    `gorm:"type:text" json:"payload"`
 	Stage      string    `gorm:"size:32" json:"stage"`
-	Status     string    `gorm:"size:16" json:"status"`
+	Status     string    `gorm:"size:32" json:"status"`
 	IngestMs   int       `json:"ingestMs"`
 	DecodeMs   int       `json:"decodeMs"`
 	StoreMs    int       `json:"storeMs"`

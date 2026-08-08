@@ -83,6 +83,10 @@ func subscribe(c paho.Client) {
 		if len(parts) < 4 {
 			return
 		}
+		// 指令应答主题由 SubscribeReply 专门处理，不按遥测合并进最新值
+		if len(parts) >= 5 && parts[4] == "reply" {
+			return
+		}
 		// OTA 进度上报：thing/up/{pk}/{dn}/ota
 		if len(parts) >= 5 && parts[4] == "ota" {
 			var d model.Device
