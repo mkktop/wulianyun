@@ -37,19 +37,11 @@ func ForwardData(r *model.Rule, d *model.Device, data map[string]interface{}) {
 	}
 }
 
-// ForwardToKafka Kafka 转发（当前为 placeholder，待引入 sarama 依赖后实现）
+// ForwardToKafka Kafka 转发（未实现）。为避免静默丢数据，明确告警并不做任何"成功"伪装；
+// 真正实现需引入 sarama，在此之前规则不应允许 type=kafka（CreateRule/UpdateRule 已在 API 层拒绝）
 func ForwardToKafka(brokers []string, topic string, d *model.Device, payload []byte) {
-	if len(brokers) == 0 || topic == "" {
-		return
-	}
-	// 注意：Kafka 需要 github.com/IBM/sarama 依赖
-	// 当前先用日志占位，待引入依赖后实现
-	// 如果项目不想引入 sarama 依赖，可以用 HTTP 代理方式转发到 Kafka
-	slog.Info("kafka forward (placeholder)", "brokers", brokers, "topic", topic, "device", d.Name)
-
-	// 实际实现需要：
-	// 1. 创建/复用 sarama.SyncProducer
-	// 2. 发送 &sarama.ProducerMessage{Topic: topic, Value: sarama.ByteEncoder(payload)}
+	slog.Error("kafka forward not implemented (rule engine accepted kafka type unexpectedly)",
+		"brokers", brokers, "topic", topic, "device", d.Name)
 }
 
 // ---- MQTT 桥接转发 ----
@@ -57,7 +49,15 @@ func ForwardToKafka(brokers []string, topic string, d *model.Device, payload []b
 var (
 	bridgeMu      sync.Mutex
 	bridgeClients = make(map[string]mqtt.Client) // broker URL -> client
+	bridgePending = make(map[string]*pendingBridge)
 )
+
+// pendingBridge singleflight：同一 broker 的并发连接请求只发起一次 Connect，其余等待结果
+type pendingBridge struct {
+	done chan struct{}
+	c    mqtt.Client
+	ok   bool
+}
 
 // ForwardToMqttBridge MQTT 桥接转发（懒初始化连接，自动复用）
 func ForwardToMqttBridge(broker, topic, username, password string, payload []byte) {
@@ -77,32 +77,54 @@ func ForwardToMqttBridge(broker, topic, username, password string, payload []byt
 	}
 }
 
+// getBridgeClient 复用 broker 连接；锁内只读写 map，阻塞 Connect 移到锁外（per-broker singleflight）
 func getBridgeClient(broker, username, password string) mqtt.Client {
+	// 快路径：锁内查 map，命中且连接健康直接返回
 	bridgeMu.Lock()
-	defer bridgeMu.Unlock()
-
 	if c, ok := bridgeClients[broker]; ok && c.IsConnected() {
+		bridgeMu.Unlock()
 		return c
 	}
+	// 已有 pending 的 singleflight，登记等待
+	if p, ok := bridgePending[broker]; ok {
+		bridgeMu.Unlock()
+		<-p.done
+		return p.c
+	}
+	p := &pendingBridge{done: make(chan struct{})}
+	bridgePending[broker] = p
+	bridgeMu.Unlock()
 
+	// 锁外阻塞连接（一个不可达 broker 最多阻塞一次 Connect，不拖慢其他 broker/租户）
 	opts := mqtt.NewClientOptions().
 		AddBroker(broker).
 		SetClientID(fmt.Sprintf("kk-iot-bridge-%d", time.Now().UnixNano())).
 		SetAutoReconnect(true).
 		SetConnectTimeout(5 * time.Second)
-
 	if username != "" {
 		opts.SetUsername(username)
 		opts.SetPassword(password)
 	}
-
 	c := mqtt.NewClient(opts)
 	token := c.Connect()
-	if !token.WaitTimeout(5*time.Second) || token.Error() != nil {
+	ok := token.WaitTimeout(5*time.Second) && token.Error() == nil
+	if !ok {
 		slog.Error("mqtt bridge connect failed", "broker", broker, "error", token.Error())
-		return nil
+		c = nil
 	}
 
-	bridgeClients[broker] = c
+	bridgeMu.Lock()
+	// 覆盖前先 Disconnect 旧客户端，防止 AutoReconnect 后台协程与 socket 泄漏（#27）
+	if ok {
+		if old, exists := bridgeClients[broker]; exists && old != c {
+			old.Disconnect(500)
+		}
+		bridgeClients[broker] = c
+	}
+	delete(bridgePending, broker)
+	bridgeMu.Unlock()
+
+	close(p.done)
+	p.c, p.ok = c, ok
 	return c
 }

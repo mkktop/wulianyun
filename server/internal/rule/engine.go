@@ -24,6 +24,10 @@ import (
 // silenceCache 静默期缓存 ruleID:deviceID -> 上次触发时间（内存级，单实例）
 var silenceCache sync.Map
 
+// firingCache 告警活跃状态缓存 ruleID:deviceID -> 标记时间（内存级，单实例）。
+// 用途：isFiring 快速判断是否已有 firing 告警，避免每个条件为假的包都 SELECT；markFiring 作并发去重门
+var firingCache sync.Map
+
 // redisSilenceRDB Redis 客户端（多实例模式下使用，nil 时退化为内存缓存）
 var redisSilenceRDB *redis.Client
 
@@ -55,20 +59,22 @@ func pushAlarmTo(userIDs []uint, payload map[string]interface{}) {
 	}
 }
 
-// ruleCache 规则缓存：按 userID 分组，TTL 30s
+// ruleCache 规则缓存：按 userID 分区，TTL 30s
+//  1. 缓存非空 nil 切片以区分"无规则用户"（负缓存），避免每包全表 SELECT；
+//  2. 按 userID 分区，单用户规则变更只刷该用户，不再一刷全失效
 var (
 	ruleCacheMu   sync.RWMutex
-	ruleCache     map[uint][]model.Rule // userID -> rules
-	ruleCacheTime time.Time
+	ruleCache     = map[uint][]model.Rule{} // userID -> rules（含 nil 表示"已查、该用户无规则"）
+	ruleCacheTime = map[uint]time.Time{}
 	ruleCacheTTL  = 30 * time.Second
 )
 
 func loadRulesForUser(userID uint) []model.Rule {
 	ruleCacheMu.RLock()
-	if time.Since(ruleCacheTime) < ruleCacheTTL && ruleCache != nil {
-		if rules, ok := ruleCache[userID]; ok {
+	if t, ok := ruleCacheTime[userID]; ok && time.Since(t) < ruleCacheTTL {
+		if rules, ok2 := ruleCache[userID]; ok2 {
 			ruleCacheMu.RUnlock()
-			return rules
+			return rules // nil 也直接返回（负缓存命中）
 		}
 	}
 	ruleCacheMu.RUnlock()
@@ -76,27 +82,27 @@ func loadRulesForUser(userID uint) []model.Rule {
 	ruleCacheMu.Lock()
 	defer ruleCacheMu.Unlock()
 	// double check
-	if time.Since(ruleCacheTime) < ruleCacheTTL && ruleCache != nil {
-		if rules, ok := ruleCache[userID]; ok {
+	if t, ok := ruleCacheTime[userID]; ok && time.Since(t) < ruleCacheTTL {
+		if rules, ok2 := ruleCache[userID]; ok2 {
 			return rules
 		}
 	}
-	// 重新加载所有用户的规则
-	var allRules []model.Rule
-	repository.DB.Where("enabled = ?", true).Find(&allRules)
-	newCache := make(map[uint][]model.Rule)
-	for _, r := range allRules {
-		newCache[r.UserID] = append(newCache[r.UserID], r)
+	// 只加载该用户的规则（按 userID 分区，不再全表加载）
+	var rules []model.Rule
+	repository.DB.Where("enabled = ? AND user_id = ?", true, userID).Find(&rules)
+	if rules == nil {
+		rules = []model.Rule{} // 显式空切片，区分"未查询"与"查无规则"
 	}
-	ruleCache = newCache
-	ruleCacheTime = time.Now()
-	return ruleCache[userID]
+	ruleCache[userID] = rules
+	ruleCacheTime[userID] = time.Now()
+	return rules
 }
 
-// InvalidateRuleCache 使规则缓存失效
+// InvalidateRuleCache 使指定用户的规则缓存失效（按 uid 分区，只刷该用户）
 func InvalidateRuleCache(userID uint) {
 	ruleCacheMu.Lock()
-	ruleCacheTime = time.Time{} // 强制过期
+	delete(ruleCache, userID)
+	delete(ruleCacheTime, userID)
 	ruleCacheMu.Unlock()
 }
 
@@ -138,11 +144,20 @@ type alarmAction struct {
 	WebhookURL string   `json:"webhookUrl"`
 }
 
+// evalResult 条件求值三态：区分"字段缺失/解析失败"（无法判定）与"求值为假"（可恢复告警）
+type evalResult int
+
+const (
+	evalFalse       evalResult = iota // 求值为假（条件明确不满足，可触发自动恢复）
+	evalTrue                          // 求值为真（满足触发条件）
+	evalIndeterminate                 // 字段缺失/无法判定（不触发也不恢复，避免部分属性上报误清告警）
+)
+
 // evalCondition 递归评估条件表达式
 // 支持两种格式：
 // 1. 旧格式（向后兼容）: {"field":"temperature","op":">","value":35}
 // 2. 新格式（复合条件）: {"logic":"and","conditions":[...]}
-func evalCondition(cond json.RawMessage, data map[string]interface{}) bool {
+func evalCondition(cond json.RawMessage, data map[string]interface{}) evalResult {
 	// 尝试解析为复合条件
 	var compound struct {
 		Logic      string            `json:"logic"`
@@ -151,19 +166,25 @@ func evalCondition(cond json.RawMessage, data map[string]interface{}) bool {
 	if err := json.Unmarshal(cond, &compound); err == nil && compound.Logic != "" {
 		switch strings.ToLower(compound.Logic) {
 		case "and":
+			if len(compound.Conditions) == 0 {
+				return evalFalse
+			}
 			for _, c := range compound.Conditions {
-				if !evalCondition(c, data) {
-					return false
+				switch evalCondition(c, data) {
+				case evalFalse:
+					return evalFalse
+				case evalIndeterminate:
+					return evalIndeterminate // 子条件缺字段则整体无法判定
 				}
 			}
-			return len(compound.Conditions) > 0
+			return evalTrue
 		case "or":
 			for _, c := range compound.Conditions {
-				if evalCondition(c, data) {
-					return true
+				if evalCondition(c, data) == evalTrue {
+					return evalTrue
 				}
 			}
-			return false
+			return evalFalse
 		}
 	}
 
@@ -174,23 +195,30 @@ func evalCondition(cond json.RawMessage, data map[string]interface{}) bool {
 		Value interface{} `json:"value"`
 	}
 	if err := json.Unmarshal(cond, &single); err != nil || single.Field == "" {
-		return false
+		return evalIndeterminate // 条件本身不合法/缺失，无法判定
 	}
 	v, ok := data[single.Field]
 	if !ok {
-		return false
+		return evalIndeterminate // 字段缺失：不是"为假"，不能误触发恢复
 	}
-	return compare(v, single.Op, single.Value)
+	if !compare(v, single.Op, single.Value) {
+		return evalFalse
+	}
+	return evalTrue
 }
 
 func evalAlarmRule(r *model.Rule, d *model.Device, data map[string]interface{}) {
-	if !evalCondition(json.RawMessage(r.Condition), data) {
-		// 条件不满足时，检查是否有 firing 状态的告警需要自动恢复
+	switch evalCondition(json.RawMessage(r.Condition), data) {
+	case evalFalse:
+		// 条件明确为假时，检查是否有 firing 状态的告警需要自动恢复
 		autoResolveAlarm(r, d)
 		return
-	}
-	if inSilence(r, d.ID) {
+	case evalIndeterminate:
+		// 字段缺失/无法判定：既不触发也不恢复（避免部分属性上报误清活跃告警）
 		return
+	}
+	if isFiring(r, d.ID) || inSilence(r, d.ID) {
+		return // 已有活跃告警或静默期内：幂等去重，不重复插 firing 行
 	}
 
 	var act alarmAction
@@ -216,11 +244,16 @@ func evalAlarmRule(r *model.Rule, d *model.Device, data map[string]interface{}) 
 
 // autoResolveAlarm 条件不满足时自动恢复 firing 状态的告警
 func autoResolveAlarm(r *model.Rule, d *model.Device) {
+	// firing 状态缓存先查：非 firing 直接跳过，避免每包无谓 SELECT（#11）
+	if !isFiring(r, d.ID) {
+		return
+	}
 	var alarm model.Alarm
 	err := repository.DB.Where("rule_id = ? AND device_id = ? AND status = ?",
 		r.ID, d.ID, model.AlarmStatusFiring).
 		Order("id desc").First(&alarm).Error
 	if err != nil {
+		clearFiring(r, d.ID) // 缓存与库不一致，清理让下次重新判定
 		return // 没有 firing 告警
 	}
 
@@ -229,6 +262,7 @@ func autoResolveAlarm(r *model.Rule, d *model.Device) {
 		"status":      model.AlarmStatusResolved,
 		"resolved_at": now,
 	})
+	clearFiring(r, d.ID) // 恢复后清除 firing 标记
 
 	// 发送恢复通知
 	var act alarmAction
@@ -287,12 +321,22 @@ func EvalOffline() {
 		}
 		for j := range devices {
 			d := &devices[j]
-			if inSilence(r, d.ID) {
+			// 幂等：已 firing 或在静默期内的设备不重复插行（#9）
+			if isFiring(r, d.ID) || inSilence(r, d.ID) {
 				continue
 			}
 			msg := fmt.Sprintf("设备[%s] 已离线超过 %d 分钟", d.Name, cond.Minutes)
 			fireAlarm(r, d, act, msg, nil)
 		}
+	}
+}
+
+// ResolveOfflineAlarms 设备上线时自动恢复其所有 firing 状态的离线告警（#9 上线分支）
+func ResolveOfflineAlarms(d *model.Device) {
+	var rules []model.Rule
+	repository.DB.Where("enabled = true AND type = ? AND user_id = ?", model.RuleTypeOffline, d.UserID).Find(&rules)
+	for i := range rules {
+		autoResolveAlarm(&rules[i], d)
 	}
 }
 
@@ -306,7 +350,49 @@ func StartOfflineChecker() {
 	}()
 }
 
+// firingKey 生成 (rule,device) 维度的 firing 状态键
+func firingKey(ruleID, deviceID uint) string {
+	return "firing:" + strconv.FormatUint(uint64(ruleID), 10) + ":" + strconv.FormatUint(uint64(deviceID), 10)
+}
+
+// isFiring 查询该 (rule,device) 是否已有 firing 状态告警（内存/Redis，避免每包 SELECT）
+func isFiring(r *model.Rule, deviceID uint) bool {
+	key := firingKey(r.ID, deviceID)
+	if redisSilenceRDB != nil {
+		val, err := redisSilenceRDB.Get(context.Background(), key).Result()
+		return err == nil && val != ""
+	}
+	_, ok := firingCache.Load(key)
+	return ok
+}
+
+// markFiring 原子标记 firing：仅当未标记时设置成功（NX 语义），返回是否由本次设置
+// 多实例用 Redis SET NX EX；单实例用 sync.Map（evalAlarmRule 上游已 inSilence/firing 双检，这里二次去重防并发包）
+func markFiring(r *model.Rule, deviceID uint) bool {
+	key := firingKey(r.ID, deviceID)
+	if redisSilenceRDB != nil {
+		ok, err := redisSilenceRDB.SetNX(context.Background(), key, "1", 24*time.Hour).Result()
+		return err == nil && ok
+	}
+	_, loaded := firingCache.LoadOrStore(key, time.Now())
+	return !loaded
+}
+
+// clearFiring 清除 firing 标记（告警恢复/上线后调用）
+func clearFiring(r *model.Rule, deviceID uint) {
+	key := firingKey(r.ID, deviceID)
+	if redisSilenceRDB != nil {
+		redisSilenceRDB.Del(context.Background(), key)
+		return
+	}
+	firingCache.Delete(key)
+}
+
 func fireAlarm(r *model.Rule, d *model.Device, act alarmAction, msg string, data map[string]interface{}) {
+	// 原子去重门：并发包场景下仅首个进入者写库（#12）
+	if !markFiring(r, d.ID) {
+		return
+	}
 	alarm := model.Alarm{
 		UserID: r.UserID, RuleID: r.ID, RuleName: r.Name,
 		DeviceID: d.ID, DeviceName: d.Name,
@@ -314,6 +400,7 @@ func fireAlarm(r *model.Rule, d *model.Device, act alarmAction, msg string, data
 	}
 	if err := repository.DB.Create(&alarm).Error; err != nil {
 		slog.Error("save alarm failed", "err", err)
+		clearFiring(r, d.ID) // 写库失败回滚标记，允许下次重试
 		return
 	}
 	markFired(r, d.ID)

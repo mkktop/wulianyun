@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,21 @@ type ruleReq struct {
 	Enabled   *bool          `json:"enabled"`
 }
 
+// validateForwardAction 数据转发规则的 action 校验。
+// Kafka 转发未实现（ForwardToKafka 仅占位），允许配置会导致数据静默丢失——在此拒绝。
+func validateForwardAction(action datatypes.JSON) string {
+	if len(action) == 0 {
+		return ""
+	}
+	var act struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(action, &act) == nil && act.Type == "kafka" {
+		return "Kafka 转发暂未实现，请使用 webhook 或 mqtt_bridge"
+	}
+	return ""
+}
+
 func CreateRule(c *gin.Context) {
 	var req ruleReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -31,6 +47,10 @@ func CreateRule(c *gin.Context) {
 	}
 	// 归属校验：规则只能引用自己可见的产品/设备（防跨租户引用 + 名称枚举）
 	if msg := validateRuleTargets(c, req.ProductID, req.DeviceID); msg != "" {
+		Fail(c, 400, msg)
+		return
+	}
+	if msg := validateForwardAction(req.Action); msg != "" {
 		Fail(c, 400, msg)
 		return
 	}
@@ -114,6 +134,10 @@ func UpdateRule(c *gin.Context) {
 	}
 	// 归属校验：规则只能引用自己可见的产品/设备（防跨租户引用 + 名称枚举）
 	if msg := validateRuleTargets(c, req.ProductID, req.DeviceID); msg != "" {
+		Fail(c, 400, msg)
+		return
+	}
+	if msg := validateForwardAction(req.Action); msg != "" {
 		Fail(c, 400, msg)
 		return
 	}

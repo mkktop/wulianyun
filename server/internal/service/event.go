@@ -37,15 +37,19 @@ func handleEventReport(d *model.Device, data map[string]interface{}) {
 		slog.Error("save event report failed", "err", err)
 		return
 	}
-	ws.H.PushEvent(d.UserID, map[string]interface{}{
+	// 实时推送：与 telemetry/status 一致，走 PushRecipients fan-out（一级账号实时看二级设备事件）
+	eventMsg := map[string]interface{}{
 		"deviceId": d.ID, "deviceName": d.Name,
 		"identifier": identifier, "type": etype,
 		"params": json.RawMessage(params), "ts": ev.CreatedAt.UnixMilli(),
-	})
+	}
+	for _, uid := range PushRecipients(d.UserID) {
+		ws.H.PushEvent(uid, eventMsg)
+	}
 	slog.Info("event reported", "device", d.Name, "identifier", identifier, "type", etype)
 
-	// 异步写入设备日志
-	go writeDeviceLog(d.UserID, d.ID, d.Name, "event",
+	// 写入设备日志（批量化 worker 异步落库）
+	writeDeviceLog(d.UserID, d.ID, d.Name, "event",
 		fmt.Sprintf("事件上报[%s] 类型:%s", identifier, etype), string(params), "")
 }
 

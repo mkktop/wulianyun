@@ -10,6 +10,7 @@ import (
 
 	"iot-platform/internal/modbus"
 	"iot-platform/internal/model"
+	"iot-platform/internal/poller"
 	"iot-platform/internal/repository"
 )
 
@@ -103,7 +104,19 @@ func SaveModbusPoints(c *gin.Context) {
 		Fail(c, 500, "保存点位失败")
 		return
 	}
+	// 点位变更：失效轮询器点位缓存并对在线设备重启采集组（否则用 5 分钟陈旧点位列表）
+	refreshModbusDevice(p)
 	OK(c, points)
+}
+
+// refreshModbusDevice 点位/采集组变更后：失效点位缓存 + 重启该产品在线设备的轮询
+func refreshModbusDevice(p *model.Product) {
+	poller.InvalidatePointCache(p.ID)
+	var devices []model.Device
+	repository.DB.Where("product_id = ? AND status = ?", p.ID, model.DeviceStatusOnline).Find(&devices)
+	for i := range devices {
+		poller.RefreshDevice(p.ProductKey, devices[i].Name)
+	}
 }
 
 // TestModbusPoint 用示例应答帧(hex)验证点位解析

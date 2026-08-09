@@ -58,6 +58,7 @@ func CreateModbusGroup(c *gin.Context) {
 		Fail(c, 500, "创建失败")
 		return
 	}
+	refreshModbusDevice(p) // 新组立即生效（#22）
 	OK(c, g)
 }
 
@@ -77,6 +78,7 @@ func UpdateModbusGroup(c *gin.Context) {
 	repository.DB.Model(&g).Updates(map[string]interface{}{
 		"name": req.Name, "poll_interval": req.PollInterval, "report_mode": req.ReportMode,
 	})
+	refreshModbusDevice(loadProductForRefresh(g.ProductID))
 	OK(c, g)
 }
 
@@ -89,7 +91,15 @@ func DeleteModbusGroup(c *gin.Context) {
 	}
 	repository.DB.Delete(&g)
 	repository.DB.Model(&model.ModbusPoint{}).Where("group_id = ?", g.ID).Update("group_id", 0)
+	refreshModbusDevice(loadProductForRefresh(g.ProductID))
 	OK(c, nil)
+}
+
+// loadProductForRefresh 加载产品（组变更后刷新轮询用）
+func loadProductForRefresh(productID uint) *model.Product {
+	var p model.Product
+	repository.DB.First(&p, productID)
+	return &p
 }
 
 // joinGroupOwner 校验分组归属当前用户（经产品关联）。采集组属产品定义，仅 owner/超管可改。

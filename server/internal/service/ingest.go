@@ -145,6 +145,27 @@ func isNewProductID(s string) bool {
 	return true
 }
 
+// stripNonTelemetryKeys 剔除系统方法键（method/messageId/code/id/params/data/result）。
+// 无论产品是否定义物模型，这些键都不是属性遥测，进入 latest/shadow/规则会污染实时数据。
+func stripNonTelemetryKeys(data map[string]interface{}) map[string]interface{} {
+	if len(data) == 0 {
+		return data
+	}
+	out := make(map[string]interface{}, len(data))
+	for k, v := range data {
+		if nonTelemetryKeys[k] {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+var nonTelemetryKeys = map[string]bool{
+	"method": true, "messageId": true, "code": true, "id": true,
+	"params": true, "data": true, "result": true, "ts": true,
+}
+
 // HandleTelemetry 处理设备上行数据（JSON 对象）；含 method=event.post 时分流到事件上报
 func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	traceID := generateTraceID()
@@ -196,9 +217,9 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	}
 	t2 := time.Now()
 
-	// 最新值白名单：有物模型时只合并已定义属性，未定义字段（如指令应答 messageId/code）
-	// 不进入实时数据/影子/规则，避免污染设备最新值（轨迹与设备日志仍保留原始 payload）
-	mergeData := data
+	// 最新值白名单：有物模型时只合并已定义属性；无论是否有物模型，都剔除系统方法键，
+	// 防止指令应答/未知 method 的 messageId/code/params/id 等污染实时数据与影子（#15）
+	mergeData := stripNonTelemetryKeys(data)
 	if props, err := LoadThingModelProps(d.ProductID); err == nil && len(props) > 0 {
 		allowed := make(map[string]bool, len(props))
 		for _, p := range props {
@@ -206,8 +227,8 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 				allowed[id] = true
 			}
 		}
-		filtered := make(map[string]interface{}, len(data))
-		for k, v := range data {
+		filtered := make(map[string]interface{}, len(mergeData))
+		for k, v := range mergeData {
 			if allowed[k] {
 				filtered[k] = v
 			}
@@ -215,30 +236,33 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 		mergeData = filtered
 	}
 
-	// 最新值缓存：按属性合并（Redis Lua 原子操作，避免竞态）
-	mergePayload, _ := json.Marshal(mergeData)
-	mergeLatestScript.Run(context.Background(), repository.RDB,
-		[]string{latestKey(d.ID)},
-		string(mergePayload), fmt.Sprintf("%d", now.UnixMilli()),
-	)
+	// 校验失败的遥测仍写入历史（供回溯），但不进 latest/shadow/rule，避免污染实时数据/触发误告警/外发（#14）
+	if valid && len(mergeData) > 0 {
+		// 最新值缓存：按属性合并（Redis Lua 原子操作，避免竞态）
+		mergePayload, _ := json.Marshal(mergeData)
+		mergeLatestScript.Run(context.Background(), repository.RDB,
+			[]string{latestKey(d.ID)},
+			string(mergePayload), fmt.Sprintf("%d", now.UnixMilli()),
+		)
 
-	// 实时推送：设备归属者 + 其一级父账号（一级实时看二级设备曲线）
-	telemetryMsg := map[string]interface{}{"ts": now.UnixMilli(), "data": mergeData}
-	for _, uid := range PushRecipients(d.UserID) {
-		ws.H.PushTelemetry(uid, d.ID, telemetryMsg)
+		// 实时推送：设备归属者 + 其一级父账号（一级实时看二级设备曲线）
+		telemetryMsg := map[string]interface{}{"ts": now.UnixMilli(), "data": mergeData}
+		for _, uid := range PushRecipients(d.UserID) {
+			ws.H.PushTelemetry(uid, d.ID, telemetryMsg)
+		}
+
+		// 同步设备影子 reported + 规则引擎评估
+		mergeShadowReported(d, mergeData)
+		rule.EvalTelemetry(d, mergeData)
 	}
-
-	// 同步设备影子 reported + 规则引擎评估
-	mergeShadowReported(d, mergeData)
-	rule.EvalTelemetry(d, mergeData)
 	t3 := time.Now()
 
-	// 异步写入消息轨迹
+	// 写入消息轨迹（批量化 worker 异步落库）
 	traceStatus := "ok"
 	if !valid {
 		traceStatus = "validation_failed"
 	}
-	go writeTrace(&model.MessageTrace{
+	writeTrace(&model.MessageTrace{
 		TraceID: traceID, UserID: d.UserID, ProductKey: productKey, DeviceName: deviceName,
 		DeviceID: d.ID, Direction: "up", Stage: "completed", Status: traceStatus,
 		Payload: string(payload),
@@ -248,8 +272,8 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 		RuleMs:   int(t3.Sub(t2).Milliseconds()),
 	})
 
-	// 异步写入设备日志
-	go writeDeviceLog(d.UserID, d.ID, d.Name, "data_up", fmt.Sprintf("上报 %d 个属性", len(data)), string(payload), traceID)
+	// 写入设备日志（批量化 worker 异步落库）
+	writeDeviceLog(d.UserID, d.ID, d.Name, "data_up", fmt.Sprintf("上报 %d 个属性", len(data)), string(payload), traceID)
 }
 
 // HandleDeviceStatus 处理上下线事件
@@ -308,9 +332,10 @@ func HandleDeviceStatus(clientID string, online bool, evtTs int64) {
 	repository.DB.Model(&model.Device{}).Where("id = ?", d.ID).Updates(updates)
 	repository.DB.Create(&model.DeviceEvent{DeviceID: d.ID, Type: eventType, Detail: "clientid: " + clientID})
 
-	// 上线时补发影子期望值
+	// 上线时补发影子期望值 + 自动恢复该设备的离线告警（#9 上线分支）
 	if online {
 		syncShadowOnConnect(d)
+		rule.ResolveOfflineAlarms(d)
 	}
 
 	// 异步写入设备日志
@@ -319,7 +344,7 @@ func HandleDeviceStatus(clientID string, online bool, evtTs int64) {
 	if online {
 		logSummary = "设备上线"
 	}
-	go writeDeviceLog(d.UserID, d.ID, d.Name, logCategory, logSummary, "clientid: "+clientID, "")
+	writeDeviceLog(d.UserID, d.ID, d.Name, logCategory, logSummary, "clientid: "+clientID, "")
 
 	statusMsg := map[string]interface{}{
 		"deviceId": d.ID, "name": d.Name, "status": status, "ts": now.UnixMilli(),
@@ -416,18 +441,26 @@ func generateTraceID() string {
 	return fmt.Sprintf("%x%d", b, time.Now().UnixNano())
 }
 
-// writeTrace 异步写入消息轨迹
+// writeTrace 写入消息轨迹（有缓冲时入批量 worker，否则直写；#17）
 func writeTrace(t *model.MessageTrace) {
+	if logBuf != nil {
+		logBuf.pushTrace(*t)
+		return
+	}
 	if err := repository.DB.Create(t).Error; err != nil {
 		slog.Warn("write trace failed", "traceId", t.TraceID, "err", err)
 	}
 }
 
-// writeDeviceLog 异步写入设备运行日志
+// writeDeviceLog 写入设备运行日志（有缓冲时入批量 worker，否则直写）
 func writeDeviceLog(userID, deviceID uint, deviceName, category, summary, payload, traceID string) {
 	log := model.DeviceLog{
 		UserID: userID, DeviceID: deviceID, DeviceName: deviceName,
 		Category: category, Summary: summary, Payload: payload, TraceID: traceID,
+	}
+	if logBuf != nil {
+		logBuf.pushLog(log)
+		return
 	}
 	if err := repository.DB.Create(&log).Error; err != nil {
 		slog.Warn("write device log failed", "err", err)

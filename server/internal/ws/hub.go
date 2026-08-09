@@ -33,6 +33,13 @@ var ValidateToken func(token string) (userID uint, err error)
 // authTimeout 首帧认证超时
 const authTimeout = 5 * time.Second
 
+// 心跳：客户端半开连接（NAT 静默丢流）检测 + 回收（#18）
+const (
+	wsPingInterval = 30 * time.Second // 定时 ping，对端无 pong 则写/读超时关闭
+	wsWriteWait    = 10 * time.Second
+	wsReadWait     = 60 * time.Second // 大于 ping 间隔；pong 重置
+)
+
 // Client 一个前端 WebSocket 连接
 type Client struct {
 	conn      *websocket.Conn
@@ -112,6 +119,15 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request) {
 	c.readLoop(h)
 }
 
+// setReadDeadlineKeepalive 读超时：pong 处理器每次收到 pong 重置，超时则连接视为半开被关闭
+func (c *Client) setReadDeadlineKeepalive() {
+	c.conn.SetReadDeadline(time.Now().Add(wsReadWait))
+	c.conn.SetPongHandler(func(string) error {
+		c.conn.SetReadDeadline(time.Now().Add(wsReadWait))
+		return nil
+	})
+}
+
 // authenticate 读取首帧并校验 token；失败时发送 auth_failed 后关闭连接
 func (h *Hub) authenticate(conn *websocket.Conn) (uint, bool) {
 	conn.SetReadDeadline(time.Now().Add(authTimeout))
@@ -158,6 +174,7 @@ func (c *Client) readLoop(h *Hub) {
 		close(c.send)
 		c.conn.Close()
 	}()
+	c.setReadDeadlineKeepalive()
 	for {
 		_, data, err := c.conn.ReadMessage()
 		if err != nil {
@@ -179,9 +196,27 @@ func (c *Client) readLoop(h *Hub) {
 }
 
 func (c *Client) writeLoop() {
-	for data := range c.send {
-		if c.conn.WriteMessage(websocket.TextMessage, data) != nil {
-			return
+	ticker := time.NewTicker(wsPingInterval)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close() // 写失败先关连接，回收半开 socket 与协程（#18）
+	}()
+	for {
+		select {
+		case data, ok := <-c.send:
+			if !ok {
+				return
+			}
+			c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if c.conn.WriteMessage(websocket.TextMessage, data) != nil {
+				return
+			}
+		case <-ticker.C:
+			// 定时 ping：对端无 pong → 读侧 setReadDeadline 超时关闭；写失败立即关
+			c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if c.conn.WriteMessage(websocket.PingMessage, nil) != nil {
+				return
+			}
 		}
 	}
 }

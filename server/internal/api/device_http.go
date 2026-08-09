@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"iot-platform/internal/model"
 	"iot-platform/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -35,11 +36,15 @@ func HTTPDeviceTelemetry(c *gin.Context) {
 	}
 	productKey, deviceName, secret := parts[0], parts[1], parts[2]
 
-	// 验证设备
-	_, err = service.FindDeviceForAuth(productKey, deviceName, secret)
+	// 验证设备（与 MQTT/TCP 一致：禁用设备的密钥未轮转仍拒绝上报）
+	d, err := service.FindDeviceForAuth(productKey, deviceName, secret)
 	if err != nil {
 		slog.Warn("http device auth failed", "pk", productKey, "dn", deviceName, "error", err)
 		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "auth failed"})
+		return
+	}
+	if d.Status == model.DeviceStatusDisabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": 403, "msg": "device disabled"})
 		return
 	}
 

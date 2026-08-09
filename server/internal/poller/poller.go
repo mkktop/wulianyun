@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -112,6 +113,30 @@ func onDisconnect(productKey, deviceName string) {
 		delete(tasks, key)
 	}
 	mu.Unlock()
+	// 清理该设备 on-change 去重缓存（key 前缀 productKey.deviceName.），避免断连/删设备留孤儿键长期内存泄漏（#28）
+	prefix := key + "."
+	lastValues.Range(func(k, v any) bool {
+		if ks, ok := k.(string); ok && len(ks) > len(prefix) && ks[:len(prefix)] == prefix {
+			lastValues.Delete(k)
+		}
+		return true
+	})
+}
+
+// RefreshDevice 采集组/点位变更后对在线设备重启轮询（#22）：
+// 设备连接后经 API 新建的采集组原本要到重连才被采集，刷新后立即生效
+func RefreshDevice(productKey, deviceName string) {
+	var p model.Product
+	if err := repository.DB.Where("product_key = ?", productKey).First(&p).Error; err != nil {
+		return
+	}
+	if p.AccessMode != model.AccessModeModbus {
+		return
+	}
+	if !gateway.Has(productKey, deviceName) {
+		return // 离线设备由下次 onConnect 启动
+	}
+	startDevice(&p, deviceName)
 }
 
 func startDevice(p *model.Product, deviceName string) {
@@ -372,5 +397,7 @@ func toFloat(v interface{}) float64 {
 }
 
 func round2(v float64) float64 {
-	return float64(int64(v*100+0.5)) / 100
+	// math.Round 对正负数对称舍入（四舍五入到最近的偶数方向取最近整数）；
+	// 原实现 int64(v*100+0.5) 对负数向零偏置（-0.51→0 而非 -1），掩盖冷链冻融阈值
+	return math.Round(v*100) / 100
 }

@@ -34,6 +34,11 @@ func ShutdownShadowCache() {
 }
 
 func getShadowEntry(deviceID uint) *shadowCacheEntry {
+	// 多实例一致性：Redis 可用（多实例）时绕过本地内存缓存，直接走 DB 读改写，
+	// 避免跨实例本地缓存陈旧导致 desired/reported 不一致（#29）。单实例仍享缓存加速
+	if repository.RDB != nil {
+		return nil
+	}
 	if v, ok := shadowCache.Load(deviceID); ok {
 		return v.(*shadowCacheEntry)
 	}

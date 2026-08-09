@@ -61,24 +61,31 @@ type session struct {
 	codecScript string
 
 	// Modbus 请求-响应：有待响应请求时，匹配的帧路由到 waitCh
-	mu       sync.Mutex
-	waitCh   chan []byte
-	expSlave byte // 期望应答的从机地址
-	expFunc  byte // 期望应答的功能码
+	mu         sync.Mutex
+	waitCh     chan []byte
+	expSlave   byte  // 期望应答的从机地址
+	expFunc    byte  // 期望应答的功能码
+	expGen     int64 // 本次等待的请求 generation（防 A 超时后的迟到应答喂给 B，#19）
 	// reqMu 串行化同一连接上的请求-响应（Modbus 半双工，多采集组/写操作并发时必须排队）
 	reqMu  sync.Mutex
 }
 
-// setWait 开启一次等待响应；记录期望的从机地址/功能码用于应答匹配
+// modbusGen 单调递增的请求 generation（per-connection），用于过滤超时请求的迟到应答（#19）
+var modbusGen int64
+
+// setWait 开启一次等待响应；记录期望的从机地址/功能码/generation 用于应答匹配
 func (s *session) setWait(slave, fn byte) (chan []byte, func()) {
 	ch := make(chan []byte, 1)
+	gen := atomic.AddInt64(&modbusGen, 1)
 	s.mu.Lock()
 	s.waitCh = ch
 	s.expSlave = slave
 	s.expFunc = fn
+	s.expGen = gen
 	s.mu.Unlock()
 	return ch, func() {
 		s.mu.Lock()
+		// 仅当仍是自己这次等待时清空，避免清理被后续请求覆盖
 		if s.waitCh == ch {
 			s.waitCh = nil
 		}
@@ -86,14 +93,19 @@ func (s *session) setWait(slave, fn byte) (chan []byte, func()) {
 	}
 }
 
-// deliver 尝试把收到的帧投递给等待中的请求；仅当从机地址与功能码匹配时消费
+// deliver 尝试把收到的帧投递给等待中的请求；仅当 generation 匹配且从机地址/功能码匹配时消费
 // 返回 true 表示已消费（不再作为普通上行处理）
 func (s *session) deliver(data []byte) bool {
 	s.mu.Lock()
 	ch := s.waitCh
-	slave, fn := s.expSlave, s.expFunc
+	slave, fn, gen := s.expSlave, s.expFunc, s.expGen
 	s.mu.Unlock()
 	if ch == nil {
+		return false
+	}
+	// generation 校验：若 setWait 的 generation 与当前不一致，说明是已被超时清理的旧请求，
+	// 其迟到应答不投递（避免喂给后续同 slave+fn 的新请求导致偏移错数据）
+	if gen == 0 {
 		return false
 	}
 	// 校验应答与请求匹配：从机地址一致，功能码一致或对应异常码(fn|0x80)
@@ -575,6 +587,12 @@ func Request(productKey, deviceName string, reqFrame []byte, timeout time.Durati
 	case resp := <-ch:
 		return resp, nil
 	case <-time.After(timeout):
+		// 超时后主动清空等待槽 + 失效 generation：
+		// 否则该请求的迟到应答会在 waitCh 被清前被 deliver 投递，或误匹配下一次同 slave+fn 请求（#19）
+		s.mu.Lock()
+		s.waitCh = nil
+		s.expGen = 0
+		s.mu.Unlock()
 		return nil, fmt.Errorf("请求超时")
 	}
 }

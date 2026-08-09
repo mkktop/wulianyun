@@ -16,10 +16,10 @@ var DownPublisher func(productKey, deviceName string, payload []byte) error
 // DownRetainedPublisher 发布 Retained 期望值（设备订阅时必达）；payload 为空表示清除
 var DownRetainedPublisher func(productKey, deviceName string, payload []byte) error
 
-// GetShadow 获取设备影子（无则初始化）
+// GetShadow 获取设备影子（无则初始化）。返回深拷贝，避免调用方并发 marshal 缓存活指针产生 data race（#30）
 func GetShadow(deviceID uint) *model.DeviceShadow {
 	if s := CachedGetShadow(deviceID); s != nil {
-		return s
+		return cloneShadow(s)
 	}
 	// 缓存未命中，从 DB 加载并初始化
 	var s model.DeviceShadow
@@ -28,6 +28,18 @@ func GetShadow(deviceID uint) *model.DeviceShadow {
 		repository.DB.Create(&s)
 	}
 	return &s
+}
+
+// cloneShadow 深拷贝影子的 Desired/Reported 字节切片，隔离调用方对缓存内容的并发读写
+func cloneShadow(s *model.DeviceShadow) *model.DeviceShadow {
+	cp := *s
+	if s.Desired != nil {
+		cp.Desired = append([]byte(nil), s.Desired...)
+	}
+	if s.Reported != nil {
+		cp.Reported = append([]byte(nil), s.Reported...)
+	}
+	return &cp
 }
 
 // UpdateShadowDesired 合并期望值；设备在线立即下发 delta，离线等上线补发
@@ -77,10 +89,10 @@ func UpdateShadowDesired(d *model.Device, desired map[string]interface{}) (*mode
 	s.Desired = data
 	s.Version++
 	entry.dirty = true
-	entry.mu.Unlock()
-
-	// retained 同步：无论设备在线与否都刷新，设备下次订阅必然拿到
+	// retained 必须在持锁内发布：解锁后发布会与并发 desired-set 竞态，
+	// 后者可能先把新期望写库、本处再用旧 merged 覆盖性发布（甚至清空）（#24）
 	pushDesiredRetained(d, merged)
+	entry.mu.Unlock()
 
 	// 立即刷盘（不等定时 flush）
 	shadowFlushAll()
@@ -160,13 +172,11 @@ func mergeShadowReported(d *model.Device, data map[string]interface{}) {
 	if changed {
 		db, _ := json.Marshal(desired)
 		s.Desired = db
+		// retained 持锁发布（解锁后发布会与并发 desired-set 竞态，#24）
+		pushDesiredRetained(d, desired)
 	}
 	entry.dirty = true
 	entry.mu.Unlock()
-	if changed {
-		// 期望达成：刷新 retained（剩余期望或清除）
-		pushDesiredRetained(d, desired)
-	}
 }
 
 // syncShadowOnConnect 设备上线时补发未达成的期望值（普通下发 + retained 兜底）

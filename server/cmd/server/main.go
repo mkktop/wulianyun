@@ -47,6 +47,7 @@ func main() {
 	// 初始化性能组件
 	service.InitDeviceCache(config.C.Cache.DeviceTTL)
 	service.InitTelemetryBuffer(config.C.TelemetryBuffer.MaxBatch, config.C.TelemetryBuffer.FlushInterval)
+	service.InitLogBuffer(200, 2) // 轨迹/设备日志批量化，避免每包 INSERT 抢占连接池（#17）
 	service.InitShadowCache(config.C.Cache.ShadowFlushInterval)
 	poller.InitPollerSemaphore(config.C.Poller.MaxConcurrent)
 
@@ -169,6 +170,7 @@ func main() {
 	gateway.Stop()
 
 	service.ShutdownShadowCache()
+	service.ShutdownLogBuffer()
 	service.ShutdownTelemetryBuffer()
 
 	slog.Info("server exited gracefully")

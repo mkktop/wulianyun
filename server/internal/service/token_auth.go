@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -102,20 +101,4 @@ func RevokeDeviceToken(token string) {
 	}
 	ctx := context.Background()
 	repository.RDB.Del(ctx, tokenPrefix+token)
-}
-
-// PublishCommandWithQoS 下行指令（支持 QoS 选择）
-// qos=2 用于关键指令（OTA、属性设置），精确一次投递
-// qos=1 用于普通通知
-// qos=0 用于火忘消息
-func PublishCommandWithQoS(productKey, deviceName string, payload []byte, qos int) error {
-	if DownPublisher == nil {
-		return fmt.Errorf("下行通道未初始化")
-	}
-	// 记录 QoS 级别到 payload 外层日志
-	go func() {
-		writeDeviceLog(0, 0, deviceName, "data_down",
-			"下行指令[QoS"+strconv.Itoa(qos)+"]", string(payload), "")
-	}()
-	return DownPublisher(productKey, deviceName, payload)
 }
