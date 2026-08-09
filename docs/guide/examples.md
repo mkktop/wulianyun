@@ -167,16 +167,25 @@ node dtu-modbus.js <productId> <deviceName> <deviceSecret> [host] [port]
 
 ## 八、WebSocket 实时订阅（管理端）
 
+> 认证方式为**首帧认证**：升级后 5 秒内必须发送 `{"type":"auth","token":"<JWT>"}`，token 不放进 URL（防泄露进访问日志）；认证失败服务端返回 `{"type":"auth_failed"}` 并关闭连接。
+
 ```js
-const ws = new WebSocket(`ws://<平台地址>/api/v1/ws?token=<JWT>`)
+const ws = new WebSocket(`ws://<平台地址>/api/v1/ws`)
 
 ws.onopen = () => {
-  // 订阅设备遥测（deviceId 为数据库主键）
+  // 首帧认证（必须，5 秒内）
+  ws.send(JSON.stringify({ type: 'auth', token: '<JWT>' }))
+  // 认证后订阅设备遥测（deviceId 为数据库主键）
   ws.send(JSON.stringify({ type: 'subscribe', deviceId: 3 }))
 }
 
 ws.onmessage = (e) => {
   const msg = JSON.parse(e.data)
+  if (msg.type === 'auth_failed') {
+    // token 失效：跳登录
+    location.href = '/login'
+    return
+  }
   // { type: 'telemetry', deviceId: 3, payload: { ts, data } }
   // { type: 'device_status', deviceId: 3, payload: { status, ts } }
   // { type: 'alarm', payload: { ruleName, level, message } }
