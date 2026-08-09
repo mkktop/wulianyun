@@ -61,6 +61,7 @@ export interface Product {
   secretMode: string
   productSecret: string
   pollInterval: number
+  requestTimeout: number
   description: string
   deviceCount: number
   createdAt: string
@@ -117,6 +118,7 @@ export interface ModbusGroup {
   productId: number
   name: string
   pollInterval: number
+  requestTimeout: number
   reportMode: string
   pointCount: number
 }

@@ -30,6 +30,10 @@
         <el-form-item label="采集周期" v-if="form.accessMode === 'modbus'">
           <el-input-number v-model="form.pollInterval" :min="60" :step="60" /> &nbsp;秒（最小 60）
         </el-form-item>
+        <el-form-item label="请求超时" v-if="form.accessMode === 'modbus'">
+          <el-input-number v-model="form.requestTimeout" :min="3" :max="30" /> &nbsp;秒（3-30，默认 3）
+          <div class="hint">单次 Modbus 读写等待从机应答的超时；响应慢的从机（老 PLC/低功耗仪表）可调大</div>
+        </el-form-item>
         <el-form-item label="密钥模式">
           <el-radio-group v-model="form.secretMode" :disabled="isEdit">
             <el-radio value="device">一机一密</el-radio>
@@ -140,7 +144,7 @@ const createdProduct = ref<Product | null>(null)
 
 const form = reactive({
   name: '', protocol: 'mqtt', accessMode: 'thingmodel',
-  secretMode: 'device', pollInterval: 60, description: '',
+  secretMode: 'device', pollInterval: 60, requestTimeout: 3, description: '',
   frameMode: 'none', frameDelimiter: '', frameLenOffset: 0, frameLenSize: 1, frameLenAdjust: 0,
   heartbeatPacket: '', heartbeatReply: ''
 })
@@ -181,6 +185,7 @@ async function loadForEdit() {
   form.accessMode = p.accessMode
   form.secretMode = p.secretMode
   form.pollInterval = p.pollInterval || 60
+  form.requestTimeout = p.requestTimeout || 3
   form.description = p.description
   form.frameMode = p.frameMode || 'none'
   form.frameDelimiter = p.frameDelimiter || ''
