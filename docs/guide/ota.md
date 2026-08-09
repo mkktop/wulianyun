@@ -7,10 +7,10 @@
 ## 一、流程总览
 
 ```
- 管理员 ──POST /api/v1/firmwares──► 上传固件（multipart，自动计算 SHA-256）
+ 管理员 ──POST /api/v1/firmwares──► 上传固件（multipart，平台计算 SHA-256）
  管理员 ──POST /api/v1/ota-tasks──► 创建升级任务（选固件 + 设备列表）
- 平台   ──thing/down/{pk}/{dn}──► 设备  {"method":"ota.push", version, url, size, sha256, taskId}
- 设备   ──HTTP GET url──────────► 平台  /uploads/firmware/...（公开下载，无鉴权）
+ 平台   ──thing/down/{pk}/{dn}──► 设备  {"method":"ota.push", version, url, size, sha256, taskId}（QoS 1）
+ 设备   ──HTTP GET url──────────► 平台  /uploads/firmware/...（公开下载，无鉴权，强制附件下载）
  设备   ──thing/up/{pk}/{dn}/ota─► 平台  {"method":"ota.progress", taskId, progress, status}
  平台   任务状态：running → completed / failed
 ```
@@ -29,7 +29,7 @@ Content-Type: multipart/form-data
 | `description` | ✘ | 描述 |
 | `file` | ✔ | 固件文件（multipart 文件字段） |
 
-上传时自动计算 **SHA-256** 校验和。响应返回 `model.Firmware`：
+上传时平台自动计算 **SHA-256** 校验和。响应返回固件记录：
 
 ```json
 {
@@ -46,16 +46,23 @@ Content-Type: multipart/form-data
 }
 ```
 
+| 响应字段 | 说明 |
+|---|---|
+| `fileUrl` | 固件下载路径（`/uploads/firmware/...`） |
+| `fileSize` | 文件字节数 |
+| `checksum` | SHA-256 校验和（十六进制） |
+
 ### 文件 URL 格式
 
 ```
-/uploads/firmware/{productID}_{version}_{unixTimestamp}_{原文件名(安全化)}
+/uploads/firmware/{产品数字ID}_{版本}_{unix时间戳}_{安全化文件名}
 ```
 
 例：`/uploads/firmware/1_1.0.3_1720000000_app.bin`
 
 - 原文件名只保留字母数字 `.` `_` `-`，其余替换为 `_`
-- 下载为**公开静态路由**（`/uploads`），无鉴权，设备可用 `sha256` 校验完整性
+- 下载为**强制附件**（`Content-Type: application/octet-stream` + `Content-Disposition: attachment`），任何扩展名都不会被浏览器渲染
+- 固件上传扩展名白名单：`.bin .hex .img .dat .zip .tar .gz .pack .rbl`；单文件上限 512 MB
 
 ## 三、创建升级任务
 
@@ -66,9 +73,10 @@ Content-Type: application/json
 { "firmwareId": 1, "deviceIds": [3, 5, 7] }
 ```
 
-- 任务按**设备 ID 列表**指定目标设备（非按产品）
+- 任务按**设备数字 ID 列表**指定目标设备（非按产品）
+- 目标设备必须与固件属于**同一产品**，不属于该产品的设备 ID 会被剔除
 - 任务状态初始为 `running`
-- 创建后立即向每个目标设备下发 `ota.push` 通知（优先 TCP 通道，回退 MQTT）
+- 创建后立即向每个目标设备下发 `ota.push` 通知（优先 TCP 通道，回退 MQTT，QoS 1）
 
 响应：
 
@@ -128,12 +136,12 @@ Content-Type: application/json
 
 查询：`GET /api/v1/ota-tasks`。
 
-## 六、当前限制（已知问题）
+## 六、当前能力边界
 
-- **无设备主动拉取**：设备只能被动等 `ota.push` 通知（非 retained，无重发机制），错过推送即漏升级；无 `ota.get` / `ota.query` 类方法
-- **无设备确认（ack）**：任务只统计推送成功数，不跟踪设备是否收到/下载成功
-- **无按设备粒度结果**：多设备任务中单个设备进度会覆盖整体进度，无法区分各设备结果
-- **无版本比较**：不校验设备当前版本 vs 目标版本，不拒绝重复版本号
-- **无删除/取消任务接口**
+接入开发时请注意以下能力约束：
 
-> 以上为当前实现边界，均在演进计划中。
+- **设备被动接收**：设备只能等待 `ota.push` 通知（非 retained，无重发），错过推送则不会自动补送；当前无设备主动查询版本的 `ota.get`/`ota.query` 方法
+- **无设备级确认**：任务仅统计推送成功数，不跟踪单台设备是否收到/下载完成；设备成功与否依赖其主动上报 `ota.progress`
+- **进度为整任务粒度**：多设备任务中，单台设备的进度上报会覆盖整体 `progress`，无法区分各设备结果
+- **无版本比较**：平台不校验设备当前版本与目标版本，不拒绝重复版本号
+- **无取消/删除任务**：任务创建后不可取消或删除

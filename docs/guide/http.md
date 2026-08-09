@@ -31,13 +31,14 @@ Content-Type: application/json
 
 > ⚠️ 该头使用的是**设备静态 Secret**（或一型一密的产品 `ProductSecret`），**不支持 `tk:` 动态令牌**。动态令牌只用于 MQTT password。
 
-## 二、鉴权逻辑
+## 二、鉴权
 
 1. 取 `X-Device-Token` 头 → Base64 解码 → 按 `:` 拆分为恰好 3 段：`productId / deviceName / secret`
-2. 调用 `FindDeviceForAuth` 校验（兼容一机一密 / 一型一密）：
+2. 平台校验三元组（一机一密 / 一型一密）：
    - 一机一密：仅接受设备独立 Secret
    - 一型一密：接受设备 Secret 或产品 `ProductSecret`；设备不存在且密钥匹配 `ProductSecret` 时**自动注册**新设备
-3. 校验通过后异步摄入遥测，立即返回成功
+3. 设备被禁用时拒绝上报（返回 403）
+4. 校验通过后异步处理遥测，立即返回成功
 
 ## 三、响应
 
@@ -47,7 +48,7 @@ Content-Type: application/json
 { "code": 0, "msg": "ok" }
 ```
 
-> 注意：响应在异步处理**之前**返回，遥测摄入失败（JSON 解析失败、TSL 校验失败等）只记日志，不影响此 200 响应。
+> 注意：响应在异步处理**之前**返回，遥测处理失败（JSON 解析失败、物模型校验失败等）只记日志，不影响此 200 响应。
 
 **错误：**
 
@@ -57,6 +58,7 @@ Content-Type: application/json
 | 401 | `{"code":401,"msg":"invalid token encoding"}` | Base64 解码失败 |
 | 401 | `{"code":401,"msg":"invalid token format"}` | 三元组非 3 段 |
 | 401 | `{"code":401,"msg":"auth failed"}` | 产品不存在 / 设备不存在 / 密钥错误（统一返回） |
+| 403 | `{"code":403,"msg":"device disabled"}` | 设备已被禁用 |
 | 400 | `{"code":400,"msg":"read body failed"}` | 读取请求体失败 |
 
 ## 四、请求体格式
@@ -77,9 +79,9 @@ Content-Type: application/json
 { "method": "event.post", "identifier": "highTemp", "type": "alert", "params": { "temperature": 35.2 } }
 ```
 
-## 五、限流说明
+## 五、速率限制
 
-HTTP 上报端点**当前无速率限制**（仅有 TCP 网关限流）。生产环境建议在边缘网关/负载均衡层自行加限流。
+HTTP 上报端点当前无平台级速率限制。生产环境建议在边缘网关 / 负载均衡层自行加限流，避免单设备高频上报冲击平台。
 
 ## 六、动态令牌换取（可选）
 

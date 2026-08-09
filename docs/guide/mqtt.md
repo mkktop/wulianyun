@@ -28,7 +28,7 @@
         平台 === 校验失败 ===► {"result":"deny"}   → EMQX 拒绝连接
 ```
 
-- 密码以 `tk:` 开头 → 走动态令牌校验（`ValidateDeviceToken`，令牌绑定签发时的 clientid 与设备密钥哈希），否则按固定密钥校验（`FindDeviceForAuth`，兼容一机一密 / 一型一密）
+- 密码以 `tk:` 开头 → 校验动态令牌（令牌绑定签发时的 clientid 与设备密钥）；否则校验固定密钥（一机一密 / 一型一密）
 - 设备被禁用 → `{"result":"deny","comment":"device disabled"}`；动态令牌在设备密钥轮转后也立即失效
 - 鉴权成功时平台会把 `username` 重写为 `{productId}/{deviceName}`（斜杠分隔）
 
@@ -88,9 +88,9 @@ payload 中带字符串 `method` 字段时，平台按方法分流：
 | `event.post` | `{"method":"event.post","identifier":"highTemp","type":"alert","params":{...}}` | 事件入库并实时推送；`type` 仅 `alert`/`fault` 保留，否则归为 `info` |
 | `ntp.request` | `{"method":"ntp.request","deviceSendTime":<ms>}` | 下行 `ntp.response` 对时 |
 | `config.get` | `{"method":"config.get"}` | 下行产品级远程配置 `config.push` |
-| `ota.progress` | `{"method":"ota.progress","taskId":1,"progress":50,"status":"upgrading"}` | 经 `thing/up/{pk}/{dn}/ota` 上报，见 [OTA升级](/guide/ota) |
+| `ota.progress` | `{"method":"ota.progress","taskId":1,"progress":50,"status":"upgrading"}` | 经 **`thing/up/{pk}/{dn}/ota`** 主题上报（注意是独立主题，非基础 up 主题），见 [OTA升级](/guide/ota) |
 
-> 指令应答（非 `method` 分流）：设备在 `thing/up/{pk}/{dn}/reply` 发布 `{"messageId":"...","code":0,"data":...}`，平台匹配 pending 的指令置为 `acked`。
+> **指令应答**：设备在 `thing/up/{pk}/{dn}/reply` 发布 `{"messageId":"...","code":0,"data":...}`，平台匹配待应答指令置为 `acked`。`messageId` 为下行指令中携带的字符串（平台生成的纳秒时间戳）。空 `messageId` 会被忽略。
 
 ### 4.3 事件上报示例
 
@@ -132,7 +132,7 @@ Content-Type: application/json
 { "code": 0, "data": { "token": "tk:1f2e...", "ttl": 3600 } }
 ```
 
-- 令牌格式：`tk:` + 32 位十六进制（16 随机字节），存于 Redis（`device:token:{token}`），过期自动失效
+- 令牌格式：`tk:` + 32 位十六进制（16 随机字节），存于服务端，过期自动失效
 - 令牌绑定签发时的设备密钥哈希：**轮转设备 Secret 后旧令牌立即失效**；设备被禁用令牌也立即失效
 - 令牌也可通过管理端撤销（`RevokeDeviceToken`）
 

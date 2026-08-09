@@ -35,8 +35,8 @@ Content-Type: application/json
 ```
 
 - 格式：`tk:` + 32 位 hex（16 随机字节）
-- 存于 Redis（`device:token:{token}`），TTL 默认 3600 秒，过期即失效
-- **绑定签发时设备**：令牌记录 clientid 与设备密钥哈希，仅该设备可用；轮转设备 Secret 或禁用设备后旧令牌立即失效
+- 令牌存于服务端，TTL 默认 3600 秒，过期即失效
+- **绑定签发时设备**：令牌记录 clientid 与设备密钥，仅该设备可用；轮转设备 Secret 或禁用设备后旧令牌立即失效
 - 可撤销（`RevokeDeviceToken`）
 
 ### 1.4 EMQX 回调（HTTP 内网）
@@ -120,14 +120,4 @@ Content-Type: application/json
 | **HTTP 上报限流** | 生产环境建议边缘加限流；服务端校验禁用设备 |
 | **OpenAPI 签名** | 签名覆盖 Method+PathAndQuery+BodyHash+AppKey+Timestamp，防篡改重放；同一请求在窗口内可原样重放，无 nonce |
 
-## 六、Redis 键一览
-
-| 键/频道 | 用途 | TTL |
-|---|---|---|
-| `device:latest:{id}` | 设备最新遥测缓存 | 常驻 |
-| `device:token:{token}` | 设备动态令牌 | 3600 秒 |
-| `silence:{ruleID}:{deviceID}` | 告警静默期 | 静默分钟数 |
-| `firing:{ruleID}:{deviceID}` | 告警活跃状态（幂等去重，仅已知 firing 才查库） | 24 小时 |
-| `poller:lock:{pid}_{gid}_{dev}` | Modbus 轮询分布式锁 | 60 秒 |
-| `ws:broadcast` | WebSocket 跨实例扇出 | — |
-| `tcp:down` | TCP 下行跨实例路由 | — |
+> 完整错误码与响应结构见 [错误码与响应参考](/guide/errors)。

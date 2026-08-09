@@ -35,8 +35,8 @@ thing/gateway/{pk}/{gatewayName}/sub/{subId}/logout
 
 ### 处理逻辑
 
-- **login**：校验网关设备 `IsGateway == true`；子设备经 `FindDeviceForAuth` 鉴权（兼容一型一密动态注册）后绑定 `gateway_id` 并置为 `online`。平台推送 `device_status` 事件（带 `via:"gateway"`、`gateway` 字段）
-- **logout**：子设备置为 `offline`
+- **login**：要求网关设备已标记为网关类型；子设备经三元组校验（一机一密 / 一型一密，一型一密下可动态注册）后绑定到该网关并置为在线。平台推送设备状态事件（标注经网关接入）
+- **logout**：子设备置为离线（绑定关系保留，再次 login 即恢复在线）
 
 ## 二、子设备上行
 
@@ -44,13 +44,13 @@ thing/gateway/{pk}/{gatewayName}/sub/{subId}/logout
 
 ## 三、子设备下行
 
-平台向 `thing/gateway/{pk}/{gatewayName}/sub/{subDeviceName}` 下发（QoS 1）：
+平台向网关下发针对某子设备的指令，主题使用**子设备名**（非 subId）：
 
 ```
 thing/gateway/{pk}/{gatewayName}/sub/{subDeviceName}
 ```
 
-网关订阅该主题（ACL 允许 `thing/gateway/{pk}/{dn}/sub/+`）后转发给子设备。
+网关订阅 `thing/gateway/{pk}/{gatewayName}/sub/+`（ACL 唯一允许 `+` 通配符的场景）后，按子设备名转发给对应子设备。
 
 ## 四、管理 API
 

@@ -59,6 +59,8 @@ export default defineConfig({
           items: [
             { text: 'OTA 升级', link: '/guide/ota' },
             { text: '开放平台 OpenAPI', link: '/guide/openapi' },
+            { text: 'OpenAPI 字段参考', link: '/guide/api-reference' },
+            { text: '错误码与响应参考', link: '/guide/errors' },
             { text: '认证与安全', link: '/guide/auth-security' }
           ]
         }

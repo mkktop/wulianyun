@@ -115,6 +115,29 @@ const res = await fetch(`http://<平台地址>${path}`, {
 console.log(await res.json())
 ```
 
+### Node.js（POST 带请求体）
+
+> 签名中的 `bodyHash` 必须与**实际发送的请求体字节**完全一致（任何空格/换行差异都会导致 401 签名错误）。
+
+```js
+const body = JSON.stringify({ params: { switch: 1 }, expireSec: 0 })
+const path = '/openapi/v1/devices/3/property'
+const bodyHash = crypto.createHash('sha256').update(body).digest('hex')
+const sign = crypto.createHmac('sha256', appSecret)
+  .update(`POST\n${path}\n${bodyHash}\n${appKey}\n${ts}`).digest('hex')
+
+const res = await fetch(`http://<平台地址>${path}`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-App-Key': appKey,
+    'X-Timestamp': String(ts),
+    'X-Sign': sign,
+  },
+  body,
+})
+```
+
 ### Python
 
 ```python
@@ -131,6 +154,24 @@ sign = hmac.new(app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
 r = requests.get(
     "http://<平台地址>" + path,
     headers={"X-App-Key": app_key, "X-Timestamp": ts, "X-Sign": sign},
+)
+print(r.json())
+```
+
+### Python（POST 带请求体）
+
+```python
+body = b'{"params": {"switch": 1}, "expireSec": 0}'
+path = "/openapi/v1/devices/3/property"
+body_hash = hashlib.sha256(body).hexdigest()
+raw = f"POST\n{path}\n{body_hash}\n{app_key}\n{ts}"
+sign = hmac.new(app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
+
+r = requests.post(
+    "http://<平台地址>" + path,
+    data=body,
+    headers={"Content-Type": "application/json",
+             "X-App-Key": app_key, "X-Timestamp": ts, "X-Sign": sign},
 )
 print(r.json())
 ```

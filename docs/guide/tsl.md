@@ -106,7 +106,7 @@
 }
 ```
 
-校验规则（`ValidateTelemetry`）：
+校验规则：
 
 - 已定义属性 → 类型 / 范围校验，失败则整条报文标记 `valid=false` 并记录 `validationErrors`
 - 校验失败（`valid=false`）的报文仍写入历史，但**不进入最新值/影子/规则**（避免污染实时数据与触发误告警）
@@ -147,7 +147,7 @@
 | accessMode | 含义 | 协议约束 | 解析方式 |
 |---|---|---|---|
 | `thingmodel` | 标准物模型（默认） | mqtt / tcp / http | 平台直接按 TSL 校验 |
-| `passthrough` | 透传解析 | 通常 tcp | 产品级 goja JS 脚本 `decode/encode`（见 [TCP-DTU接入协议](/guide/tcp-dtu)） |
+| `passthrough` | 透传解析 | 通常 tcp | 产品级 JS 脚本 `decode/encode`（见 [TCP-DTU接入协议](/guide/tcp-dtu)） |
 | `modbus` | Modbus 云端轮询 | **强制 tcp** | 平台按点位表主动轮询寄存器 |
 
 ## 九、密钥模式

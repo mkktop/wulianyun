@@ -1,6 +1,6 @@
 # TCP 透传（DTU）接入协议
 
-> 平台在 **:9100** 提供 TCP 透传网关，适用于串口设备经 DTU 以 TCP 长连接接入：连接后先发**注册包**鉴权，再按产品组帧配置收发数据帧。支持三种数据模式：标准物模型 JSON、透传脚本（goja JS `decode/encode`）、Modbus 云端轮询。
+> 平台在 **:9100** 提供 TCP 透传网关，适用于串口设备经 DTU 以 TCP 长连接接入：连接后先发**注册包**鉴权，再按产品组帧配置收发数据帧。支持三种数据模式：标准物模型 JSON、透传脚本（JS `decode/encode`）、Modbus 云端轮询。
 >
 > 相关：组帧/脚本 → [物模型TSL](/guide/tsl) · 下行 → [下行控制与设备影子](/guide/downlink-shadow)
 
@@ -8,7 +8,7 @@
 
 ```
 设备 ──TCP连接 :9100──► 平台
-设备 ──注册包(10s内)────► {productId},{deviceName},{secret}\n   或   RegCode\n
+设备 ──注册包(10s内)────► {productId},{deviceName},{secret}\n   或   注册码\n
 平台 ──OK\n──► 设备（鉴权成功，进入数据阶段）
 平台 ──ERR\n──► 设备（鉴权失败，随即断开）
 设备 ──数据帧──► 平台（按组帧配置切分，心跳 `PING`/`PONG`）
@@ -21,8 +21,8 @@
 
 | 格式 | 示例 | 说明 |
 |---|---|---|
-| **三元组** | `pk123,dev1,secret123\n` | 逗号分隔恰好 3 段，走 `FindDeviceForAuth` 鉴权（兼容一机一密/一型一密） |
-| **自定义注册码** | `865207041234567\n` | 整行作为 RegCode 匹配设备 `reg_code` 字段（IMEI/ICCID 等） |
+| **三元组** | `pk123,dev1,secret123\n` | 逗号分隔恰好 3 段，平台校验三元组（兼容一机一密/一型一密） |
+| **自定义注册码** | `865207041234567\n` | 整行作为注册码匹配设备（IMEI/ICCID 等，设备管理时可设置） |
 
 **响应：**
 
@@ -74,7 +74,7 @@ TCP 是字节流，需要按产品配置切分数据帧（解决粘包/拆包）
 { "temperature": 25.5, "humidity": 60.2 }
 ```
 
-### 透传脚本契约（goja JS）
+### 透传脚本契约（JS）
 
 ```javascript
 // 上行解码（必填）：bytes 为 0-255 整数数组，必须返回对象
@@ -88,14 +88,14 @@ function encode(obj) {
 }
 ```
 
-- 单脚本执行超时 **200ms**（`vm.Interrupt`）
-- 编译结果按 `productID + sha256(script)` 缓存，热执行不重编译
+- 单脚本执行超时 **200ms**，超时即判失败
+- 脚本编译结果会缓存，热执行不重复编译；保存脚本时平台会先做编译校验
 - 在线测试：`POST /api/v1/products/:id/codec/test`（hex 报文）
 
 ## 六、下行数据（平台→设备）
 
 - **透传产品**：平台直接写回 TCP 连接。有 `encode` 脚本时把 JSON 参数编码为二进制，否则原样透传 JSON
-- **Modbus 产品**：由平台轮询引擎按点位表主动写寄存器/线圈（`poller.WriteProperty`）
+- **Modbus 产品**：平台按点位表主动写寄存器/线圈（详见下方 Modbus 规格）
 - 下行**不等待设备回执**（非应答式），写超时 5 秒
 
 ## 七、Modbus 规格
@@ -125,7 +125,7 @@ function encode(obj) {
 - **rawType**：`int16 / uint16(默认) / int32 / uint32 / float`（占 2 寄存器，大端）、`bool / bits`
 - **取值换算**：`raw * scale + offset`
 - **采集组**（分频）：同组点位共享 `pollInterval` 与 `reportMode`（`periodic` 全量 / `onchange` 仅变更）；未分组点位归默认组（id=0，用产品 `pollInterval`）
-- **轮询引擎**：合并连续寄存器批量读（`maxGap=8`、读寄存器上限 120）、单请求超时 3s、并发上限 50；多实例用 Redis SETNX 锁防重复采集
+- **轮询引擎**：合并连续寄存器批量读（`maxGap=8`、读寄存器上限 120）、单请求超时 3s、并发上限 50；多实例部署时平台保证同一设备组仅一个实例采集
 
 ## 八、限流与容错
 

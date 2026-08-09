@@ -99,21 +99,23 @@ r = requests.get(
 print(r.json())
 ```
 
-> ⚠️ 无 nonce / 防重放机制；签名仅覆盖 `appKey + timestamp`，不含请求体，持有 AppSecret 即可对应用归属资源签名。
+> 签名覆盖 **Method + PathAndQuery + BodyHash + AppKey + Timestamp**，捕获的签名无法被改写为其他请求（不同 method/path/body 会得到不同签名）。同一请求在 ±5 分钟时间窗口内可被原样重放，当前无 nonce 防重放机制。
 
 ## 三、端点列表
 
-Base path：`/openapi/v1`（**不带** `/api/v1` 前缀）
+Base path：`/openapi/v1`（**不带** `/api/v1` 前缀）。各端点的完整字段、请求/响应结构见 [OpenAPI 字段参考](/guide/api-reference)。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/openapi/v1/devices` | 分页设备列表；query：`productId`、`keyword`、`status`、`groupId`、`page`、`pageSize` |
-| GET | `/openapi/v1/devices/:id` | 设备详情 |
-| GET | `/openapi/v1/devices/:id/latest` | 设备最新值 |
-| GET | `/openapi/v1/devices/:id/history` | 历史遥测；query：`start`（毫秒）、`end`（毫秒）、`limit`（默认 2000，上限 5000） |
+| GET | `/openapi/v1/devices` | 分页设备列表；query：`productId`（产品数字 ID）、`keyword`、`status`、`groupId`、`page`、`size`（上限 100） |
+| GET | `/openapi/v1/devices/:id` | 设备详情（`:id` 为设备数字 ID） |
+| GET | `/openapi/v1/devices/:id/latest` | 设备最新遥测 |
+| GET | `/openapi/v1/devices/:id/history` | 历史遥测；query：`start`（毫秒）、`end`（毫秒）、`limit`（默认 2000，上限 **50000**，无分页） |
 | GET | `/openapi/v1/devices/:id/shadow` | 设备影子 |
 | POST | `/openapi/v1/devices/:id/property` | 属性设置：`{"params": {...}, "expireSec": 0}` |
-| POST | `/openapi/v1/devices/:id/command` | 透传命令：body 为**原始 JSON** |
+| POST | `/openapi/v1/devices/:id/command` | 透传命令：body 为**任意原始 JSON**（不生成 messageId，无应答状态机） |
+
+> 设备/产品标识：路径中的 `:id` 与 query 中的 `productId` 均为**数字 ID**（数据库主键），不是产品标识字符串。
 
 ### 属性设置示例
 
