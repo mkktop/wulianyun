@@ -12,7 +12,8 @@ const deviceName = 'dev1'
 const secret = '...'
 
 const client = mqtt.connect('mqtt://<平台地址>:1883', {
-  clientId: `${productId}.${deviceName}`,
+  // ClientID = 产品ID + 设备名 纯拼接（无分隔符），如 'AB1234567890dev1'
+  clientId: `${productId}${deviceName}`,
   username: deviceName,
   password: secret,
   reconnectPeriod: 3000,

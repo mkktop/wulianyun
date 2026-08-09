@@ -10,13 +10,13 @@
 |---|---|---|
 | Broker | `tcp://<平台地址>:1883` | 生产环境为公网地址；本地开发 `127.0.0.1:1883` |
 | MQTT over WebSocket | `ws://<平台地址>:8083` | 浏览器/弱网设备 |
-| ClientID | `{productId}.{deviceName}` | **必须**，产品ID 固定 12 字符，按字符数解析（设备名可含 `.`） |
+| ClientID | `{productId}{deviceName}` | **必须**：前 12 字符为产品ID（2 大写字母+10 数字），其余为设备名（纯拼接，无分隔符；设备名可含点号） |
 | Username | `{deviceName}` | 仅设备名，不含产品前缀 |
 | Password | `{deviceSecret}` | 一机一密下的设备密钥；或 `tk:{token}` 动态令牌 |
 | Clean Session | 建议 `false` | 持久会话，重连后补发离线消息 |
 | Keep Alive | 建议 ≤ 60s | 配合遗嘱实现秒级离线 |
 
-> 产品ID 固定 **12 字符**（2 位大写字母 + 10 位数字，如 `AB1234567890`），平台取 ClientID 前 12 字符作为产品ID、其余部分作为设备名，**设备名可以包含点号**。
+> ClientID 结构：**前 12 字符为产品ID**（2 位大写字母 + 10 位数字，如 `AB1234567890`），其后为设备名，**纯拼接、无分隔符**。设备名本身可包含点号（如 `AB1234567890wifi.bathroom`）——平台按字符位置解析，不按点号拆分。设备名不能以点号开头。
 
 ### 鉴权流程
 
@@ -146,7 +146,8 @@ const deviceName = 'dev1'
 const secret = '...'
 
 const client = mqtt.connect('mqtt://<平台地址>:1883', {
-  clientId: `${productId}.${deviceName}`,
+  // ClientID = 产品ID + 设备名 纯拼接（无分隔符）
+  clientId: `${productId}${deviceName}`,
   username: deviceName,
   password: secret,
   reconnectPeriod: 3000,

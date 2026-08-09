@@ -48,7 +48,7 @@ node simulator.js <productId> <deviceName> <deviceSecret> [broker]
 | 项 | 值 |
 |---|---|
 | MQTT Broker | `tcp://<平台地址>:1883`（WebSocket：`ws://<平台地址>:8083`） |
-| MQTT ClientID | `{productId}.{deviceName}` |
+| MQTT ClientID | `{productId}{deviceName}` | 前 12 字符为产品ID，其后为设备名（纯拼接，无分隔符） |
 | MQTT Username | `{deviceName}` |
 | MQTT Password | `{deviceSecret}` 或 `tk:{token}` 动态令牌 |
 | TCP 网关 | `<平台地址>:9100` |

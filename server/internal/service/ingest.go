@@ -112,12 +112,12 @@ func FindDeviceByRegCode(regCode string) (*model.Device, error) {
 	return &d, nil
 }
 
-// ParseClientID clientid 约定为 {productId}.{deviceName}
-// 产品ID 固定 12 字符（2 位字母 + 10 位数字），按字符数解析（设备名可含点号）
+// ParseClientID clientid 约定为 {productId}{deviceName}：产品ID 与设备名纯拼接，无分隔符
+// 产品ID 固定 12 字符（2 位字母 + 10 位数字），按字符数解析——前 12 字符为产品ID，其余为设备名
+// （设备名可含点号，点号只是设备名自身字符，不是分隔符）
 func ParseClientID(clientID string) (productKey, deviceName string, ok bool) {
-	// 前 12 字符为产品ID，第 13 字符为分隔点号
-	if len(clientID) > 13 && isNewProductID(clientID[:12]) && clientID[12] == '.' {
-		dn := clientID[13:]
+	if len(clientID) > 12 && isNewProductID(clientID[:12]) {
+		dn := clientID[12:]
 		if dn != "" {
 			return clientID[:12], dn, true
 		}

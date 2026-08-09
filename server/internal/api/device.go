@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -32,6 +33,12 @@ func CreateDevice(c *gin.Context) {
 	var req deviceReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, 400, "产品和设备名称必填")
+		return
+	}
+	// 设备名不能以点号开头：ClientID 为产品ID+设备名纯拼接（无分隔符），
+	// 前导点会让 ClientID 形如 {产品ID}.{设备名}，易被误认为是分隔符
+	if strings.HasPrefix(req.Name, ".") {
+		Fail(c, 400, "设备名称不能以点号开头")
 		return
 	}
 	p, err := canViewProduct(c, req.ProductID)

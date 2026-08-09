@@ -8,7 +8,7 @@
 
 | 项 | 值 |
 |---|---|
-| ClientID | `{productId}.{deviceName}` |
+| ClientID | `{productId}{deviceName}` | 前 12 字符为产品ID，其后为设备名（纯拼接，无分隔符；设备名可含点号） |
 | Username | `{deviceName}` |
 | Password | 设备 Secret（一机一密）或产品 `ProductSecret`（一型一密）或 `tk:{token}` 动态令牌 |
 
