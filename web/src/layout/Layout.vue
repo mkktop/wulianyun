@@ -6,28 +6,28 @@
         <span v-if="!collapsed">KK物联云</span>
       </div>
       <el-menu :default-active="active" router :collapse="collapsed" :collapse-transition="false" background-color="#001529" text-color="#a6adb4" active-text-color="#fff">
-        <el-menu-item index="/overview">
+        <el-menu-item index="/console/overview">
           <el-icon><Odometer /></el-icon><template #title><span>平台概览</span></template>
         </el-menu-item>
-        <el-menu-item index="/products">
+        <el-menu-item index="/console/products">
           <el-icon><Box /></el-icon><template #title><span>产品管理</span></template>
         </el-menu-item>
-        <el-menu-item index="/devices">
+        <el-menu-item index="/console/devices">
           <el-icon><Cpu /></el-icon><template #title><span>设备管理</span></template>
         </el-menu-item>
-        <el-menu-item index="/rules">
+        <el-menu-item index="/console/rules">
           <el-icon><SetUp /></el-icon><template #title><span>规则引擎</span></template>
         </el-menu-item>
-        <el-menu-item index="/alarms">
+        <el-menu-item index="/console/alarms">
           <el-icon><BellFilled /></el-icon><template #title><span>告警中心</span></template>
         </el-menu-item>
-        <el-menu-item index="/apps">
+        <el-menu-item index="/console/apps">
           <el-icon><Key /></el-icon><template #title><span>应用管理</span></template>
         </el-menu-item>
-        <el-menu-item v-if="tier !== 'secondary'" index="/accounts">
+        <el-menu-item v-if="tier !== 'secondary'" index="/console/accounts">
           <el-icon><UserFilled /></el-icon><template #title><span>子账号管理</span></template>
         </el-menu-item>
-        <el-menu-item index="/ota">
+        <el-menu-item index="/console/ota">
           <el-icon><UploadFilled /></el-icon><template #title><span>OTA升级</span></template>
         </el-menu-item>
         <el-menu-item index="/screen">
@@ -35,9 +35,9 @@
         </el-menu-item>
         <el-sub-menu index="tools">
           <template #title><el-icon><Monitor /></el-icon><span>开发工具</span></template>
-          <el-menu-item index="/tools/simulator">设备模拟器</el-menu-item>
-          <el-menu-item index="/tools/mqtt-debug">MQTT调试台</el-menu-item>
-          <el-menu-item index="/tools/traces">消息轨迹</el-menu-item>
+          <el-menu-item index="/console/tools/simulator">设备模拟器</el-menu-item>
+          <el-menu-item index="/console/tools/mqtt-debug">MQTT调试台</el-menu-item>
+          <el-menu-item index="/console/tools/traces">消息轨迹</el-menu-item>
         </el-sub-menu>
       </el-menu>
       <a class="docs-link" href="/developer/" target="_blank" rel="noopener" :title="'开发文档'">
@@ -117,18 +117,22 @@ import Clock from '../components/Clock.vue'
 
 const route = useRoute()
 const router = useRouter()
-const active = computed(() => (route.path.startsWith('/devices') ? '/devices' : route.path.startsWith('/products') ? '/products' : route.path))
+const active = computed(() => {
+  // 控制台整体挂载在 /console 前缀下，菜单 index 为 /console/*，剥掉前缀后做详情页归组匹配
+  const p = route.path.startsWith('/console') ? route.path.slice('/console'.length) : route.path
+  return '/console' + (p.startsWith('/devices') ? '/devices' : p.startsWith('/products') ? '/products' : p)
+})
 const username = localStorage.getItem('username') || '用户'
 const collapsed = ref(false)
 
-// 面包屑：详情页回链上级列表
+// 面包屑：详情页回链上级列表（控制台路径统一带 /console 前缀）
 const breadcrumbs = computed(() => {
   const crumbs: { title: string; path?: string }[] = []
-  const p = route.path
+  const p = route.path.replace(/^\/console/, '')
   if (p.startsWith('/products/') || p.startsWith('/devices/')) {
     crumbs.push(p.startsWith('/products')
-      ? { title: '产品管理', path: '/products' }
-      : { title: '设备管理', path: '/devices' })
+      ? { title: '产品管理', path: '/console/products' }
+      : { title: '设备管理', path: '/console/devices' })
   }
   const t = route.meta.title as string
   if (t) crumbs.push({ title: t })
@@ -142,7 +146,7 @@ const notifyAlarm = debounce((payload: any) => {
     message: payload.message,
     type: payload.level === 'critical' ? 'error' : 'warning',
     duration: 8000,
-    onClick: () => router.push('/alarms')
+    onClick: () => router.push('/console/alarms')
   })
 }, 800)
 function onMsg(msg: any) {

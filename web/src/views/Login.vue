@@ -69,7 +69,7 @@ async function submit() {
       localStorage.setItem('username', user.nickname || user.username)
       localStorage.setItem('tier', computeTier(user))
       localStorage.setItem('perm', user.permission || 'operate')
-      router.push('/')
+      router.push('/console/overview')
     }
   } finally {
     loading.value = false

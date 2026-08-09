@@ -6,10 +6,12 @@ const router = createRouter({
   routes: [
     { path: '/login', component: () => import('../views/Login.vue') },
     { path: '/screen', component: () => import('../views/BigScreen.vue') },
+    // 公开官网首页（免登录）
+    { path: '/', component: () => import('../views/Home.vue') },
     {
-      path: '/',
+      path: '/console',
       component: () => import('../layout/Layout.vue'),
-      redirect: '/overview',
+      redirect: '/console/overview',
       children: [
         { path: 'overview', component: () => import('../views/Overview.vue'), meta: { title: '平台概览' } },
         { path: 'products', component: () => import('../views/Products.vue'), meta: { title: '产品管理' } },
@@ -25,9 +27,13 @@ const router = createRouter({
         { path: 'ota', component: () => import('../views/OTA.vue'), meta: { title: 'OTA升级' } },
         { path: 'tools/simulator', component: () => import('../views/DeviceSimulator.vue'), meta: { title: '设备模拟器' } },
         { path: 'tools/mqtt-debug', component: () => import('../views/MqttDebug.vue'), meta: { title: 'MQTT调试台' } },
-        { path: 'tools/traces', component: () => import('../views/MessageTraces.vue'), meta: { title: '消息轨迹' } }
+        { path: 'tools/traces', component: () => import('../views/MessageTraces.vue'), meta: { title: '消息轨迹' } },
+        // /console 下未匹配路径（含旧链接转换来的）统一回落控制台首页，避免与顶层兜底构成重定向环
+        { path: ':pathMatch(.*)*', redirect: '/console/overview' }
       ]
-    }
+    },
+    // 旧控制台链接兼容：/overview → /console/overview，/products/:id → /console/products/:id
+    { path: '/:pathMatch(.*)*', redirect: (to) => `/console/${(to.params.pathMatch as string[]).join('/')}` }
   ]
 })
 
@@ -35,8 +41,9 @@ router.beforeEach((to) => {
   // 路由切换：取消所有进行中的请求，避免旧页面请求结果覆盖新页面数据
   cancelAllPending()
   const token = localStorage.getItem('token')
-  if (!token && to.path !== '/login') return '/login'
-  if (token && to.path === '/login') return '/'
+  // 公开页面：/（官网首页）、/login；其余（含 /console/*）需要登录
+  if (!token && to.path !== '/login' && to.path !== '/') return '/login'
+  if (token && to.path === '/login') return '/console/overview'
 })
 
 export default router

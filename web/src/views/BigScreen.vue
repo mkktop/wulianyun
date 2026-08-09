@@ -3,7 +3,7 @@
     <div class="screen-header">
       <h1>KK物联云 · 数据大屏</h1>
       <div class="time">{{ now }}</div>
-      <el-button link class="exit" @click="$router.push('/overview')">
+      <el-button link class="exit" @click="$router.push('/console/overview')">
         <el-icon color="#7ee7ff" :size="20"><Close /></el-icon>
       </el-button>
     </div>
