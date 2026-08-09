@@ -37,7 +37,8 @@ type productReq struct {
 	DataFormat   string `json:"dataFormat"`
 	AccessMode   string `json:"accessMode" binding:"omitempty,oneof=thingmodel passthrough modbus"`
 	SecretMode   string `json:"secretMode" binding:"omitempty,oneof=device product"`
-	PollInterval int    `json:"pollInterval"`
+	PollInterval  int    `json:"pollInterval"`
+	RequestTimeout int  `json:"requestTimeout"` // Modbus 单次 RTU 请求超时(秒)，钳制[3,30]，默认3
 	Description  string `json:"description"`
 
 	// TCP 组帧/心跳（透传产品可配；Modbus 固定按 RTU 组帧）
@@ -84,6 +85,13 @@ func CreateProduct(c *gin.Context) {
 	if req.PollInterval < 60 {
 		req.PollInterval = 60
 	}
+	// Modbus 单次 RTU 请求超时钳制：最低 3s（防过短误超时），上限 30s（防拖垮轮询节奏）
+	if req.RequestTimeout < 3 {
+		req.RequestTimeout = 3
+	}
+	if req.RequestTimeout > 30 {
+		req.RequestTimeout = 30
+	}
 	// Modbus 接入必须走 TCP（MQTT/HTTP 不支持 Modbus）
 	if req.AccessMode == model.AccessModeModbus {
 		req.Protocol = "tcp"
@@ -93,7 +101,8 @@ func CreateProduct(c *gin.Context) {
 	p := model.Product{
 		UserID: UID(c), Name: req.Name, ProductKey: genProductKey(),
 		Protocol: req.Protocol, DataFormat: req.DataFormat, Description: req.Description,
-		AccessMode: req.AccessMode, SecretMode: req.SecretMode, PollInterval: req.PollInterval,
+		AccessMode: req.AccessMode, SecretMode: req.SecretMode,
+		PollInterval: req.PollInterval, RequestTimeout: req.RequestTimeout,
 		FrameMode: req.FrameMode, FrameDelimiter: req.FrameDelimiter,
 		FrameLenOffset: req.FrameLenOffset, FrameLenSize: req.FrameLenSize, FrameLenAdjust: req.FrameLenAdjust,
 		HeartbeatPacket: req.HeartbeatPacket, HeartbeatReply: req.HeartbeatReply,
@@ -190,10 +199,21 @@ func UpdateProduct(c *gin.Context) {
 			return
 		}
 	}
-	// 接入方式/协议/密钥模式创建后不可变；允许改名称/描述/采集周期/组帧与心跳配置
+	// 接入方式/协议/密钥模式创建后不可变；允许改名称/描述/采集周期/请求超时/组帧与心跳配置
 	updates := map[string]interface{}{"name": req.Name, "description": req.Description}
 	if p.AccessMode == model.AccessModeModbus && req.PollInterval >= 60 {
 		updates["poll_interval"] = req.PollInterval
+	}
+	// Modbus 请求超时：钳制 [3,30]，仅在 modbus 产品生效
+	if p.AccessMode == model.AccessModeModbus && req.RequestTimeout > 0 {
+		rt := req.RequestTimeout
+		if rt < 3 {
+			rt = 3
+		}
+		if rt > 30 {
+			rt = 30
+		}
+		updates["request_timeout"] = rt
 	}
 	// 非 Modbus 的 TCP 产品：允许调整组帧/心跳配置
 	if p.Protocol == "tcp" && p.AccessMode != model.AccessModeModbus {

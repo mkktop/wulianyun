@@ -79,6 +79,7 @@ type Product struct {
 	SecretMode  string    `gorm:"size:16;default:device" json:"secretMode"`     // device/product
 	ProductSecret string  `gorm:"size:64" json:"productSecret"`                 // 一型一密的产品级密钥
 	PollInterval  int     `gorm:"default:60" json:"pollInterval"`               // Modbus 采集周期(秒)
+	RequestTimeout int    `gorm:"default:3" json:"requestTimeout"`              // Modbus 单次 RTU 请求超时(秒)，默认3，钳制[3,30]
 	CodecScript string    `gorm:"type:text" json:"codecScript"` // 自定义协议解析脚本(JS)
 	Description string    `gorm:"size:255" json:"description"`
 

@@ -22,7 +22,14 @@ import (
 	"iot-platform/internal/service"
 )
 
-const requestTimeout = 3 * time.Second
+// requestTimeoutOf 取产品的单次 RTU 请求超时；未配置(<3s)或非 Modbus 时回退默认 3s
+// 用户可经产品 API 配置 requestTimeout 字段（钳制 [3,30]）适配响应慢的从机
+func requestTimeoutOf(p *model.Product) time.Duration {
+	if p != nil && p.RequestTimeout >= 3 {
+		return time.Duration(p.RequestTimeout) * time.Second
+	}
+	return 3 * time.Second
+}
 
 type task struct {
 	cancel chan struct{}
@@ -258,10 +265,11 @@ func pollGroup(p *model.Product, deviceName string, g groupPlan) {
 
 	// 合并为最少的批量读请求
 	blocks := modbus.PlanReadBlocks(ptrs)
+	timeout := requestTimeoutOf(p)
 	data := map[string]interface{}{}
 	for _, b := range blocks {
 		req := modbus.BuildBlockRequest(b)
-		resp, err := gateway.Request(p.ProductKey, deviceName, req, requestTimeout)
+		resp, err := gateway.Request(p.ProductKey, deviceName, req, timeout)
 		if err != nil {
 			slog.Warn("modbus block poll failed", "device", deviceName, "group", g.name,
 				"slave", b.SlaveID, "start", b.Start, "qty", b.Quantity, "err", err)
@@ -347,7 +355,7 @@ func WriteProperty(productKey, deviceName string, payload []byte) error {
 			continue
 		}
 		// 写操作也等待应答（回显帧），失败不阻塞其他点位
-		if _, err := gateway.Request(productKey, deviceName, frame, requestTimeout); err != nil {
+		if _, err := gateway.Request(productKey, deviceName, frame, requestTimeoutOf(&p)); err != nil {
 			lastErr = err
 			continue
 		}
