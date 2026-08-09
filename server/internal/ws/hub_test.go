@@ -31,8 +31,9 @@ func (e *echoPubSub) Subscribe(ctx context.Context, channel string) <-chan []byt
 // 修复后客户端应只收到 1 份（instanceID 跳过自身回声）。
 func TestPushNoDuplicateWithEcho(t *testing.T) {
 	h := &Hub{clients: map[uint]map[*Client]bool{}}
+	ValidateToken = func(token string) (uint, error) { return 1, nil }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.Serve(w, r, 1)
+		h.Serve(w, r)
 	}))
 	defer srv.Close()
 
@@ -42,6 +43,10 @@ func TestPushNoDuplicateWithEcho(t *testing.T) {
 	}
 	defer conn.Close()
 
+	// 首帧 token 认证
+	if err := conn.WriteJSON(inMsg{Type: "auth", Token: "t"}); err != nil {
+		t.Fatalf("auth: %v", err)
+	}
 	// 订阅设备 5
 	if err := conn.WriteJSON(inMsg{Type: "subscribe", DeviceID: 5}); err != nil {
 		t.Fatalf("subscribe: %v", err)
@@ -74,8 +79,9 @@ func TestPushNoDuplicateWithEcho(t *testing.T) {
 // TestDispatchFromOtherInstance 另一实例发来的广播（不同 instanceID）应正常投递。
 func TestDispatchFromOtherInstance(t *testing.T) {
 	h := &Hub{clients: map[uint]map[*Client]bool{}}
+	ValidateToken = func(token string) (uint, error) { return 1, nil }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.Serve(w, r, 1)
+		h.Serve(w, r)
 	}))
 	defer srv.Close()
 
@@ -85,6 +91,10 @@ func TestDispatchFromOtherInstance(t *testing.T) {
 	}
 	defer conn.Close()
 
+	// 首帧 token 认证
+	if err := conn.WriteJSON(inMsg{Type: "auth", Token: "t"}); err != nil {
+		t.Fatalf("auth: %v", err)
+	}
 	if err := conn.WriteJSON(inMsg{Type: "subscribe", DeviceID: 7}); err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}

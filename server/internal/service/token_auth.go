@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -38,13 +39,15 @@ func GenerateDeviceToken(productKey, deviceName, secret string) (string, int, er
 	rand.Read(b)
 	token := "tk:" + hex.EncodeToString(b)
 
-	// 存入 Redis，带 TTL
+	// 存入 Redis，带 TTL；绑定签发时设备密钥的哈希——密钥轮转后旧 token 立即失效
 	ttl := defaultTokenTTL
 	ctx := context.Background()
+	secretHash := sha256.Sum256([]byte(secret))
 	tokenData, _ := json.Marshal(map[string]interface{}{
 		"deviceId":   d.ID,
-		"productId": productKey,
+		"productId":  productKey,
 		"deviceName": deviceName,
+		"secretHash": hex.EncodeToString(secretHash[:]),
 		"issuedAt":   time.Now().Unix(),
 	})
 	repository.RDB.Set(ctx, tokenPrefix+token, tokenData, time.Duration(ttl)*time.Second)
@@ -71,11 +74,23 @@ func ValidateDeviceToken(token string) (*model.Device, error) {
 		DeviceID   uint   `json:"deviceId"`
 		ProductKey string `json:"productId"`
 		DeviceName string `json:"deviceName"`
+		SecretHash string `json:"secretHash"`
 	}
 	json.Unmarshal(data, &info)
 	d, err := FindDevice(info.ProductKey, info.DeviceName)
 	if err != nil {
 		return nil, fmt.Errorf("设备不存在")
+	}
+	// 设备被禁用：token 立即失效
+	if d.Status == model.DeviceStatusDisabled {
+		return nil, fmt.Errorf("设备已禁用")
+	}
+	// 密钥轮转：签发时的密钥哈希与当前不一致 → 旧 token 失效
+	if info.SecretHash != "" {
+		cur := sha256.Sum256([]byte(d.Secret))
+		if info.SecretHash != hex.EncodeToString(cur[:]) {
+			return nil, fmt.Errorf("设备密钥已变更，token 失效")
+		}
 	}
 	return d, nil
 }

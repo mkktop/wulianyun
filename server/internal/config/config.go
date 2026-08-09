@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log/slog"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -84,5 +85,12 @@ func Load(path string) error {
 	if err != nil {
 		return err
 	}
-	return yaml.Unmarshal(data, &C)
+	if err := yaml.Unmarshal(data, &C); err != nil {
+		return err
+	}
+	// 安全提醒：JWT 密钥过弱时告警——默认占位符是仓库公开值，可用它伪造 admin 令牌
+	if C.JWT.Secret == "" || len(C.JWT.Secret) < 16 || C.JWT.Secret == "iot-platform-jwt-secret-change-me" {
+		slog.Warn("JWT secret 为空或为默认占位符，可被伪造 admin 令牌；生产环境务必配置随机强密钥")
+	}
+	return nil
 }

@@ -34,10 +34,12 @@ func SaveCodec(c *gin.Context) {
 		Fail(c, 400, "参数错误")
 		return
 	}
-	// 非空脚本先做一次编译验证（用空报文跑 decode，只报编译类错误）
-	if req.Script != "" && !strings.Contains(req.Script, "function decode") {
-		Fail(c, 400, "脚本必须包含 decode 函数")
-		return
+	// 非空脚本先做一次真实编译校验（坏脚本拒绝落库，否则线上每包都解析失败）
+	if req.Script != "" {
+		if err := codec.Validate(p.ID, req.Script); err != nil {
+			Fail(c, 400, err.Error())
+			return
+		}
 	}
 	repository.DB.Model(p).Update("codec_script", req.Script)
 	OK(c, nil)
@@ -45,7 +47,7 @@ func SaveCodec(c *gin.Context) {
 
 // TestCodec 用十六进制报文测试解析脚本
 func TestCodec(c *gin.Context) {
-	p, err := canViewProduct(c, c.Param("id"))
+	_, err := canViewProduct(c, c.Param("id"))
 	if err != nil {
 		Fail(c, 404, "产品不存在")
 		return
@@ -63,7 +65,8 @@ func TestCodec(c *gin.Context) {
 		Fail(c, 400, "hex 报文格式错误")
 		return
 	}
-	obj, err := codec.Decode(p.ID, req.Script, data)
+	// 测试解析：不污染产品缓存；脚本/报文大小由 codec 层限制
+	obj, err := codec.TestDecode(req.Script, data)
 	if err != nil {
 		Fail(c, 400, err.Error())
 		return

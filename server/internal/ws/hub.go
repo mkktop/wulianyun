@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -23,6 +24,14 @@ var instanceID = func() string {
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
+
+// ValidateToken 首帧认证回调（由 main 注入）：校验 token 并返回用户 ID。
+// 设计：token 不放进 WS URL（会泄露进 nginx/代理 access log），升级后首条消息必须携带
+// {type:"auth", token}，5 秒内未认证或认证失败即关闭连接。
+var ValidateToken func(token string) (userID uint, err error)
+
+// authTimeout 首帧认证超时
+const authTimeout = 5 * time.Second
 
 // Client 一个前端 WebSocket 连接
 type Client struct {
@@ -54,7 +63,8 @@ type RedisPubSuber interface {
 const wsChannel = "ws:broadcast"
 
 type inMsg struct {
-	Type     string `json:"type"` // subscribe / unsubscribe
+	Type     string `json:"type"` // auth / subscribe / unsubscribe
+	Token    string `json:"token"`
 	DeviceID uint   `json:"deviceId"`
 }
 
@@ -78,11 +88,16 @@ func StartPubSub() {
 	slog.Info("ws pubsub started", "channel", wsChannel)
 }
 
-// Serve 升级 HTTP 连接并托管读写
-func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, userID uint) {
+// Serve 升级 HTTP 连接并托管读写；先做首帧 token 认证（防 URL 泄露 JWT）
+func (h *Hub) Serve(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Warn("ws upgrade failed", "err", err)
+		return
+	}
+	// 首帧认证：5 秒内必须发送 {type:"auth", token}
+	userID, ok := h.authenticate(conn)
+	if !ok {
 		return
 	}
 	c := &Client{conn: conn, userID: userID, send: make(chan []byte, 64), done: make(chan struct{}), deviceIDs: map[uint]bool{}}
@@ -95,6 +110,37 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, userID uint) {
 
 	go c.writeLoop()
 	c.readLoop(h)
+}
+
+// authenticate 读取首帧并校验 token；失败时发送 auth_failed 后关闭连接
+func (h *Hub) authenticate(conn *websocket.Conn) (uint, bool) {
+	conn.SetReadDeadline(time.Now().Add(authTimeout))
+	_, data, err := conn.ReadMessage()
+	if err != nil {
+		conn.Close()
+		return 0, false
+	}
+	var m inMsg
+	if json.Unmarshal(data, &m) != nil || m.Type != "auth" || m.Token == "" {
+		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth_failed"}`))
+		conn.Close()
+		return 0, false
+	}
+	if ValidateToken == nil {
+		slog.Error("ws ValidateToken 未注入")
+		conn.Close()
+		return 0, false
+	}
+	userID, err := ValidateToken(m.Token)
+	if err != nil {
+		slog.Warn("ws auth failed", "err", err)
+		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth_failed"}`))
+		conn.Close()
+		return 0, false
+	}
+	// 认证通过后清除读超时（后续由 readLoop 常规读取）
+	conn.SetReadDeadline(time.Time{})
+	return userID, true
 }
 
 func (c *Client) readLoop(h *Hub) {

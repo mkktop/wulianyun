@@ -142,6 +142,13 @@ func handleSysEvent(payload []byte, online bool) {
 	service.QueueStatus(evt.ClientID, online, evt.Ts)
 }
 
+// Disconnect 主动断开 broker 连接（优雅关闭时停止接收设备上行）
+func Disconnect() {
+	if client != nil && client.IsConnected() {
+		client.Disconnect(1000)
+	}
+}
+
 // PublishDown 向设备下行主题发布消息（QoS 1）
 func PublishDown(productKey, deviceName string, payload []byte) error {
 	return PublishDownWithQoS(productKey, deviceName, payload, QoS1)

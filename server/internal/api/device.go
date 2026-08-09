@@ -173,7 +173,13 @@ func UpdateDevice(c *gin.Context) {
 		}
 		updates["reg_code"] = *req.RegCode
 	}
-	if req.GroupID != nil {
+	if req.GroupID != nil && *req.GroupID > 0 {
+		// 分组归属校验：只能把设备移入自己可见的分组（防跨租户分组名泄露/移入他人分组）
+		var g model.DeviceGroup
+		if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", *req.GroupID).First(&g).Error; err != nil {
+			Fail(c, 400, "分组不存在或无权访问")
+			return
+		}
 		updates["group_id"] = *req.GroupID
 	}
 	if req.Tags != nil {

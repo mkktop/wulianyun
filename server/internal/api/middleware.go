@@ -61,10 +61,21 @@ func JWTAuth() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, Resp{Code: 401, Msg: "登录已过期"})
 			return
 		}
-		c.Set("uid", claims.UserID)
+		// 回查 DB：禁用/删除账号即时失效；角色/层级以库为准（token 内的 claim 可能陈旧，
+		// 否则被降级/改父账号的用户在 token 有效期内仍持有旧权限）
+		var u model.User
+		if err := repository.DB.Select("id, role, parent_id, status").First(&u, claims.UserID).Error; err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, Resp{Code: 401, Msg: "账号不存在"})
+			return
+		}
+		if u.Status == model.AccountStatusDisabled {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, Resp{Code: 401, Msg: "账号已禁用"})
+			return
+		}
+		c.Set("uid", u.ID)
 		c.Set("username", claims.Username)
-		c.Set("role", claims.Role)
-		c.Set("pid", claims.ParentID)
+		c.Set("role", u.Role)
+		c.Set("pid", u.ParentID)
 		c.Next()
 	}
 }

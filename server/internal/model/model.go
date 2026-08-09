@@ -151,6 +151,7 @@ type OpenApp struct {
 	Name      string    `gorm:"size:64;not null" json:"name"`
 	AppKey    string    `gorm:"size:32;uniqueIndex;not null" json:"appKey"`
 	AppSecret string    `gorm:"size:64;not null" json:"appSecret"`
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	// 注意：不能加 gorm:"default:true"——false 会被 GORM 零值省略，禁用永远写不进去（与 Valid/Rule.Enabled 同类）
+	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"createdAt"`
 }

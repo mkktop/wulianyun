@@ -131,6 +131,16 @@ func OpenAPIAuth() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, Resp{Code: 401, Msg: "AppKey 无效或已禁用"})
 			return
 		}
+		// 应用归属用户必须存在且未被禁用（禁用账号的 token/应用即时失效）
+		var owner model.User
+		if err := repository.DB.Select("id, role, parent_id, status").First(&owner, app.UserID).Error; err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, Resp{Code: 401, Msg: "应用归属账号不存在"})
+			return
+		}
+		if owner.Status == model.AccountStatusDisabled {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, Resp{Code: 401, Msg: "应用归属账号已禁用"})
+			return
+		}
 		// 读取并还原请求体，计算 body 哈希参与签名
 		bodyBytes, _ := io.ReadAll(c.Request.Body)
 		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
@@ -139,8 +149,11 @@ func OpenAPIAuth() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, Resp{Code: 401, Msg: "签名错误"})
 			return
 		}
-		// 以应用归属用户身份访问，复用管理端处理器
-		c.Set("uid", app.UserID)
+		// 以应用归属用户身份访问，复用管理端处理器；
+		// role/pid 以库为准，下游 RequireOperate/Tier 据此判定写权限（viewer 账号不能经 OpenAPI 写设备）
+		c.Set("uid", owner.ID)
+		c.Set("role", owner.Role)
+		c.Set("pid", owner.ParentID)
 		c.Next()
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"strings"
 	"sync"
@@ -56,6 +57,8 @@ type session struct {
 	fr       *framer // 组帧器（鉴权后按产品配置构造）
 	hbPacket []byte  // 自定义心跳请求（空=默认 PING）
 	hbReply  []byte  // 自定义心跳应答（空=默认 PONG）
+	// codecScript 产品解析脚本（建连时随产品配置一并加载，上行/下行直接使用，不逐帧查库）
+	codecScript string
 
 	// Modbus 请求-响应：有待响应请求时，匹配的帧路由到 waitCh
 	mu       sync.Mutex
@@ -116,6 +119,34 @@ func getIPCounter(ip string) *int64 {
 	var counter int64
 	actual, _ := ipConnCount.LoadOrStore(ip, &counter)
 	return actual.(*int64)
+}
+
+// startIPCleanup 定期回收按源 IP 统计的连接计数与限流桶（防长期运行 map 无限增长）
+func startIPCleanup() {
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			// 连接计数归零的 IP 移除
+			ipConnCount.Range(func(k, v interface{}) bool {
+				if atomic.LoadInt64(v.(*int64)) == 0 {
+					ipConnCount.Delete(k)
+				}
+				return true
+			})
+			// 超过 30 分钟未活动的限流桶移除
+			rateLimiterMu.Lock()
+			for ip, lb := range rateLimiters {
+				lb.mu.Lock()
+				idle := time.Since(lb.lastFill)
+				lb.mu.Unlock()
+				if idle > 30*time.Minute {
+					delete(rateLimiters, ip)
+				}
+			}
+			rateLimiterMu.Unlock()
+		}
+	}()
 }
 
 type tokenBucket struct {
@@ -189,6 +220,9 @@ func idleTimeout() time.Duration {
 }
 
 // Start 启动 TCP 网关（异步）
+// listener 包级保存以便 Stop 关闭（优雅关闭时停止接收新连接）
+var listener net.Listener
+
 func Start() {
 	addr := config.C.Gateway.Addr
 	if addr == "" {
@@ -217,10 +251,15 @@ func Start() {
 		}
 		slog.Info("tcp gateway started", "addr", addr)
 	}
+	listener = ln
+	startIPCleanup()
 	go func() {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
+				if errors.Is(err, net.ErrClosed) {
+					return // 监听器已关闭（优雅退出）
+				}
 				slog.Warn("tcp accept failed", "err", err)
 				continue
 			}
@@ -303,9 +342,10 @@ func handleConn(conn net.Conn) {
 	}
 	s := &session{
 		conn: conn, productKey: productKey, deviceName: deviceName, productID: d.ProductID,
-		fr:       newFramer(&p),
-		hbPacket: parseBytes(p.HeartbeatPacket),
-		hbReply:  parseBytes(p.HeartbeatReply),
+		fr:          newFramer(&p),
+		hbPacket:    parseBytes(p.HeartbeatPacket),
+		hbReply:     parseBytes(p.HeartbeatReply),
+		codecScript: p.CodecScript, // 建连时已加载，避免每帧上行/每条下行重复 SELECT
 	}
 
 	// 同设备重复连接：踢掉旧连接
@@ -399,17 +439,23 @@ func (s *session) replyHeartbeat() {
 
 // handleUplink 上行数据：优先脚本解析，其次尝试 JSON
 func handleUplink(s *session, data []byte) {
-	var p model.Product
-	if err := repository.DB.Select("id, codec_script").First(&p, s.productID).Error; err != nil {
-		return
-	}
-	if p.CodecScript != "" {
-		obj, err := codec.Decode(p.ID, p.CodecScript, data)
+	if s.codecScript != "" {
+		obj, err := codec.Decode(s.productID, s.codecScript, data)
 		if err != nil {
 			slog.Warn("codec decode failed", "device", s.deviceName, "err", err)
 			return
 		}
-		payload, _ := json.Marshal(obj)
+		payload, err := json.Marshal(obj)
+		if err != nil {
+			// 脚本返回 NaN/Infinity 等无法 JSON 序列化的值时不能静默丢弃——记录并去除非有限浮点后重试
+			slog.Warn("codec result marshal failed, sanitizing", "device", s.deviceName, "err", err)
+			sanitizeNonFinite(obj)
+			payload, err = json.Marshal(obj)
+			if err != nil {
+				slog.Warn("codec result still unmarshalable, dropped", "device", s.deviceName, "err", err)
+				return
+			}
+		}
 		service.HandleTelemetry(s.productKey, s.deviceName, payload)
 		return
 	}
@@ -418,6 +464,33 @@ func handleUplink(s *session, data []byte) {
 		return
 	}
 	slog.Warn("dtu raw data dropped (no codec script)", "device", s.deviceName, "len", len(data))
+}
+
+// sanitizeNonFinite 把 map 中 NaN/±Inf 浮点替换为 nil（JSON 无法序列化，避免整包丢弃）
+func sanitizeNonFinite(v interface{}) {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		for k, item := range t {
+			sanitizeNonFinite(item)
+			if f, ok := t[k].(float64); ok && (math.IsNaN(f) || math.IsInf(f, 0)) {
+				t[k] = nil
+			}
+		}
+	case []interface{}:
+		for i, item := range t {
+			sanitizeNonFinite(item)
+			if f, ok := t[i].(float64); ok && (math.IsNaN(f) || math.IsInf(f, 0)) {
+				t[i] = nil
+			}
+		}
+	}
+}
+
+// Stop 关闭 TCP 网关监听（优雅关闭时调用；已建立的连接由各自读循环超时自然结束）
+func Stop() {
+	if listener != nil {
+		listener.Close()
+	}
 }
 
 // Has 设备是否通过 TCP 网关在线
@@ -437,11 +510,10 @@ func Send(productKey, deviceName string, payload []byte) error {
 		return net.ErrClosed
 	}
 	out := payload
-	var p model.Product
-	if err := repository.DB.Select("id, codec_script").First(&p, s.productID).Error; err == nil && p.CodecScript != "" {
+	if s.codecScript != "" {
 		var params map[string]interface{}
 		if json.Unmarshal(payload, &params) == nil {
-			if encoded, ok, err := codec.Encode(p.ID, p.CodecScript, params); err == nil && ok {
+			if encoded, ok, err := codec.Encode(s.productID, s.codecScript, params); err == nil && ok {
 				out = encoded
 			}
 		}

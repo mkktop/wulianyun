@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -27,7 +28,35 @@ type simSession struct {
 var (
 	simMu       sync.RWMutex
 	simSessions = make(map[string]*simSession)
+	// maxSimSessions 模拟会话上限；simSessionTTL 会话最大存活时长（防无限增长）
+	maxSimSessions = 1000
+	simSessionTTL  = 1 * time.Hour
 )
+
+// sweepSimSessions 清理过期会话；超过上限时按创建时间淘汰最旧（调用方需持 simMu 写锁）
+func sweepSimSessions() {
+	now := time.Now()
+	for id, s := range simSessions {
+		if s.Status == "disconnected" || now.Sub(s.CreatedAt) > simSessionTTL {
+			delete(simSessions, id)
+		}
+	}
+	if len(simSessions) >= maxSimSessions {
+		// 淘汰最旧的 N 个（保新会话）
+		type kv struct {
+			id string
+			t  time.Time
+		}
+		list := make([]kv, 0, len(simSessions))
+		for id, s := range simSessions {
+			list = append(list, kv{id, s.CreatedAt})
+		}
+		sort.Slice(list, func(i, j int) bool { return list[i].t.Before(list[j].t) })
+		for _, e := range list[:len(list)-maxSimSessions+1] {
+			delete(simSessions, e.id)
+		}
+	}
+}
 
 func ConnectSimulator(c *gin.Context) {
 	var req struct {
@@ -61,6 +90,7 @@ func ConnectSimulator(c *gin.Context) {
 		ProductKey: p.ProductKey, DeviceName: d.Name, Status: "connected", CreatedAt: time.Now(),
 	}
 	simMu.Lock()
+	sweepSimSessions()
 	simSessions[sessionID] = sess
 	simMu.Unlock()
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"time"
 
@@ -166,8 +167,25 @@ func Overview(c *gin.Context) {
 }
 
 // WSHandler WebSocket 实时推送入口
+// 认证方式：升级后首帧必须发送 {type:"auth", token}（token 不放进 URL，防泄露进访问日志）
 func WSHandler(c *gin.Context) {
-	ws.H.Serve(c.Writer, c.Request, UID(c))
+	ws.H.Serve(c.Writer, c.Request)
+}
+
+// ValidateWSToken WS 首帧 token 校验：解析 JWT 并回查账号状态（禁用/删除即时失效）
+func ValidateWSToken(token string) (uint, error) {
+	claims, err := ParseToken(token)
+	if err != nil {
+		return 0, err
+	}
+	var u model.User
+	if err := repository.DB.Select("id, status").First(&u, claims.UserID).Error; err != nil {
+		return 0, fmt.Errorf("账号不存在")
+	}
+	if u.Status == model.AccountStatusDisabled {
+		return 0, fmt.Errorf("账号已禁用")
+	}
+	return u.ID, nil
 }
 
 func atoi64(s string) int64 {

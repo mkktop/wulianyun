@@ -19,6 +19,12 @@ type authReq struct {
 	Nickname string `json:"nickname"`
 }
 
+// dummyPasswordHash 登录时序防枚举：用户不存在时也执行一次 bcrypt 比较（对照此固定哈希）
+var dummyPasswordHash = func() []byte {
+	h, _ := bcrypt.GenerateFromPassword([]byte("dummy-password-for-timing"), bcrypt.DefaultCost)
+	return h
+}()
+
 // @Summary      用户注册
 // @Description  注册一个新用户账号（默认角色 user）
 // @Tags         认证
@@ -67,13 +73,18 @@ func Login(c *gin.Context) {
 	}
 	var user model.User
 	err := repository.DB.Where("username = ?", req.Username).First(&user).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) ||
-		(err == nil && bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil) {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 用户不存在：仍执行一次 bcrypt 比较（对照固定哈希），抹平"用户名不存在"与"密码错误"的时序差异
+		bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(req.Password))
 		Fail(c, 400, "用户名或密码错误")
 		return
 	}
 	if err != nil {
 		Fail(c, 500, "登录失败")
+		return
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil {
+		Fail(c, 400, "用户名或密码错误")
 		return
 	}
 	if user.Status == model.AccountStatusDisabled {

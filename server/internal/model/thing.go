@@ -53,7 +53,8 @@ type Rule struct {
 	Action    datatypes.JSON `gorm:"type:jsonb;default:'{}'" json:"action"`
 	Silence    int            `gorm:"default:5" json:"silence"`     // 静默期(分钟)，防告警风暴
 	RetryCount int            `gorm:"default:3" json:"retryCount"` // Webhook重试次数
-	Enabled    bool           `gorm:"default:true" json:"enabled"`
+	// 注意：不能加 gorm:"default:true"——false 会被 GORM 零值省略，草稿规则会被存成启用（与 OpenApp.Enabled 同类）
+	Enabled    bool           `json:"enabled"`
 	CreatedAt time.Time      `json:"createdAt"`
 
 	ProductName string `gorm:"-" json:"productName"`

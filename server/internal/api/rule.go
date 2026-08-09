@@ -29,6 +29,11 @@ func CreateRule(c *gin.Context) {
 		Fail(c, 400, "规则名称和类型必填")
 		return
 	}
+	// 归属校验：规则只能引用自己可见的产品/设备（防跨租户引用 + 名称枚举）
+	if msg := validateRuleTargets(c, req.ProductID, req.DeviceID); msg != "" {
+		Fail(c, 400, msg)
+		return
+	}
 	r := model.Rule{
 		UserID: UID(c), Name: req.Name, Type: req.Type,
 		ProductID: req.ProductID, DeviceID: req.DeviceID,
@@ -49,6 +54,25 @@ func CreateRule(c *gin.Context) {
 	OK(c, r)
 }
 
+// validateRuleTargets 校验规则引用的产品/设备归属：产品必须可见；设备必须可见且属于该产品
+func validateRuleTargets(c *gin.Context, productID, deviceID uint) string {
+	if productID > 0 {
+		if _, err := canViewProduct(c, productID); err != nil {
+			return "产品不存在或无权访问"
+		}
+	}
+	if deviceID > 0 {
+		var d model.Device
+		if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", deviceID).First(&d).Error; err != nil {
+			return "设备不存在或无权访问"
+		}
+		if productID > 0 && d.ProductID != productID {
+			return "设备不属于该产品"
+		}
+	}
+	return ""
+}
+
 func ListRules(c *gin.Context) {
 	q := repository.DB.Model(&model.Rule{}).Scopes(ownedScope(c, ""))
 	if t := c.Query("type"); t != "" {
@@ -59,17 +83,17 @@ func ListRules(c *gin.Context) {
 	page, size := pageArgs(c)
 	var list []model.Rule
 	q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list)
-	// 补充产品/设备名
+	// 补充产品/设备名（带归属 scope 回填：不可见的资源不泄露名称）
 	for i := range list {
 		if list[i].ProductID > 0 {
 			var p model.Product
-			if repository.DB.Select("name").First(&p, list[i].ProductID).Error == nil {
+			if repository.DB.Scopes(productScope(c)).Select("name").Where("id = ?", list[i].ProductID).First(&p).Error == nil {
 				list[i].ProductName = p.Name
 			}
 		}
 		if list[i].DeviceID > 0 {
 			var d model.Device
-			if repository.DB.Select("name").First(&d, list[i].DeviceID).Error == nil {
+			if repository.DB.Scopes(ownedScope(c, "")).Select("name").Where("id = ?", list[i].DeviceID).First(&d).Error == nil {
 				list[i].DeviceName = d.Name
 			}
 		}
@@ -86,6 +110,11 @@ func UpdateRule(c *gin.Context) {
 	var req ruleReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, 400, "参数错误")
+		return
+	}
+	// 归属校验：规则只能引用自己可见的产品/设备（防跨租户引用 + 名称枚举）
+	if msg := validateRuleTargets(c, req.ProductID, req.DeviceID); msg != "" {
+		Fail(c, 400, msg)
 		return
 	}
 	updates := map[string]interface{}{

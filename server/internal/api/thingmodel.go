@@ -207,9 +207,15 @@ func ImportThingModel(c *gin.Context) {
 		return
 	}
 	defer file.Close()
-	body, err := io.ReadAll(file)
+	// 大小上限：防止超大物模型文件单请求 OOM（正常物模型 JSON 远小于此）
+	const maxTSLImportSize = 8 << 20
+	body, err := io.ReadAll(io.LimitReader(file, maxTSLImportSize+1))
 	if err != nil {
 		Fail(c, 400, "读取文件失败")
+		return
+	}
+	if len(body) > maxTSLImportSize {
+		Fail(c, 400, "物模型文件过大（上限 8MB）")
 		return
 	}
 

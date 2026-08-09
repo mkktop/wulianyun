@@ -63,6 +63,9 @@ func main() {
 	// 一级账号实时接收二级账号设备的告警（fan-out 注入）
 	rule.RecipientResolver = service.PushRecipients
 
+	// WebSocket 首帧认证注入（token 不放进 URL，防泄露进访问日志）
+	ws.ValidateToken = api.ValidateWSToken
+
 	// 多实例：TCP 下行通道跨实例路由
 	service.InitDownRouter(repository.RDB)
 
@@ -152,16 +155,21 @@ func main() {
 	<-ctx.Done()
 	slog.Info("shutting down server...")
 
-	// shutdown 时逆序关闭性能组件
-	service.ShutdownShadowCache()
-	service.ShutdownTelemetryBuffer()
-
-	// 优雅关闭 HTTP 服务
+	// 关闭顺序（数据可靠性）：
+	// 1. 先停止接收新 HTTP 请求（在途请求最多 5s 内完成，期间遥测入口仍在写缓冲，不丢数据）
+	// 2. 再停止遥测入口（MQTT 断开 + TCP 网关停止监听），避免新数据进入已停止的缓冲
+	// 3. 最后逆序关闭性能组件：缓冲最后关，且等待最后一次 flush 完成
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("server shutdown failed", "err", err)
 	}
+
+	mqtt.Disconnect()
+	gateway.Stop()
+
+	service.ShutdownShadowCache()
+	service.ShutdownTelemetryBuffer()
 
 	slog.Info("server exited gracefully")
 }

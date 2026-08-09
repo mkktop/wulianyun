@@ -1,4 +1,4 @@
-// WebSocket 实时推送封装：自动重连 + 设备订阅 + requestAnimationFrame 批量派发
+// WebSocket 实时推送封装：首帧 token 认证 + 指数退避重连 + 设备订阅 + requestAnimationFrame 批量派发
 type Handler = (msg: any) => void
 
 class RealtimeClient {
@@ -6,6 +6,7 @@ class RealtimeClient {
   private handlers = new Set<Handler>()
   private subscribed = new Set<number>()
   private timer: number | null = null
+  private retryDelay = 3000 // 重连退避：3s → 6s → 12s → … → 30s 封顶，连接成功后复位
   // 批量派发缓冲：同一帧内收到的多条消息合并到下一帧统一派发，
   // 避免高频推送时同步遍历 handler 阻塞主线程、放大成请求风暴。
   private pending: any[] = []
@@ -15,23 +16,44 @@ class RealtimeClient {
     const token = localStorage.getItem('token')
     if (!token || this.ws) return
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    this.ws = new WebSocket(`${proto}://${location.host}/api/v1/ws?token=${token}`)
+    // token 不放进 URL（会泄露进 nginx/代理 access log）：连接后首帧发送 {type:'auth',token}
+    this.ws = new WebSocket(`${proto}://${location.host}/api/v1/ws`)
     this.ws.onopen = () => {
+      this.retryDelay = 3000 // 连接成功，退避复位
+      this.send({ type: 'auth', token })
       // 重连后恢复订阅
       this.subscribed.forEach((id) => this.send({ type: 'subscribe', deviceId: id }))
     }
     this.ws.onmessage = (e) => {
       try {
-        this.pending.push(JSON.parse(e.data))
+        const msg = JSON.parse(e.data)
+        if (msg.type === 'auth_failed') {
+          // token 失效：停止重连并跳转登录
+          this.stop()
+          localStorage.removeItem('token')
+          location.href = '/login'
+          return
+        }
+        this.pending.push(msg)
         this.scheduleFlush()
       } catch { /* ignore */ }
     }
     this.ws.onclose = () => {
       this.ws = null
       if (localStorage.getItem('token')) {
-        this.timer = window.setTimeout(() => this.connect(), 3000)
+        this.timer = window.setTimeout(() => this.connect(), this.retryDelay)
+        this.retryDelay = Math.min(this.retryDelay * 2, 30000)
       }
     }
+  }
+
+  private stop() {
+    if (this.timer) window.clearTimeout(this.timer)
+    if (this.rafId != null) cancelAnimationFrame(this.rafId)
+    this.rafId = null
+    this.pending = []
+    this.ws?.close()
+    this.ws = null
   }
 
   // 下一帧统一派发：高频推送时一帧内只触发一轮 handler 遍历。
@@ -60,12 +82,7 @@ class RealtimeClient {
   }
 
   close() {
-    if (this.timer) window.clearTimeout(this.timer)
-    if (this.rafId != null) cancelAnimationFrame(this.rafId)
-    this.rafId = null
-    this.pending = []
-    this.ws?.close()
-    this.ws = null
+    this.stop()
     this.subscribed.clear()
   }
 

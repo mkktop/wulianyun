@@ -67,13 +67,15 @@ func NewRouter() *gin.Engine {
 		v1.POST("/emqx/acl", EmqxACL)   // EMQX 授权回调（内网）
 		v1.POST("/http/telemetry", HTTPDeviceTelemetry) // 设备HTTP上报（Token认证）
 
+		// WebSocket 实时推送：公开升级，首帧 {type:"auth",token} 认证（token 不进 URL）
+		v1.GET("/ws", WSHandler)
+
 		// 需登录
 		auth := v1.Group("", JWTAuth())
 		{
 			auth.GET("/auth/profile", Profile)
 			auth.POST("/auth/change-password", ChangePassword)
 			auth.GET("/overview", Overview)
-			auth.GET("/ws", WSHandler)
 
 			// ---- 只读接口 ----
 			auth.GET("/products", ListProducts)
@@ -186,7 +188,7 @@ func NewRouter() *gin.Engine {
 		}
 	}
 
-	// OpenAPI：第三方应用签名访问，复用管理端处理器
+	// OpenAPI：第三方应用签名访问，复用管理端处理器；写端点复用 RequireOperate（viewer 账号不能写设备）
 	open := r.Group("/openapi/v1", OpenAPIAuth())
 	{
 		open.GET("/devices", ListDevices)
@@ -194,8 +196,8 @@ func NewRouter() *gin.Engine {
 		open.GET("/devices/:id/latest", DeviceLatest)
 		open.GET("/devices/:id/history", DeviceHistory)
 		open.GET("/devices/:id/shadow", GetDeviceShadow)
-		open.POST("/devices/:id/property", SetDeviceProperty)
-		open.POST("/devices/:id/command", SendCommand)
+		open.POST("/devices/:id/property", RequireOperate(), SetDeviceProperty)
+		open.POST("/devices/:id/command", RequireOperate(), SendCommand)
 	}
 	// 静态资源：OTA 固件下载（fileURL 形如 /uploads/firmware/...）；文件名含时间戳+产品ID随机化
 	// 强制以附件方式下载（octet-stream + attachment + nosniff），防止上传文件被同源渲染（存储型 XSS）

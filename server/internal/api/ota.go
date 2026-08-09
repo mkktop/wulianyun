@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,6 +27,9 @@ var firmwareExtAllowed = map[string]bool{
 	".bin": true, ".hex": true, ".img": true, ".dat": true,
 	".zip": true, ".tar": true, ".gz": true, ".pack": true, ".rbl": true,
 }
+
+// maxFirmwareUpload 固件上传 body 上限（与 nginx client_max_body_size 512m 对齐）
+const maxFirmwareUpload = 512 << 20
 
 func ListFirmwares(c *gin.Context) {
 	q := repository.DB.Scopes(ownedScope(c, ""))
@@ -77,7 +81,8 @@ func CreateFirmware(c *gin.Context) {
 		return
 	}
 
-	// 处理文件上传
+	// 处理文件上传（服务端强制 body 上限，nginx client_max_body_size 之外的第二道防线，防涨盘）
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxFirmwareUpload)
 	var fileURL string
 	var fileSize int64
 	var checksum string
@@ -179,15 +184,26 @@ func CreateOTATask(c *gin.Context) {
 		return
 	}
 
-	// 校验设备归属并查询设备信息
+	// 校验设备归属并查询设备信息（且必须与固件属于同一产品，防止把 A 产品固件推给 B 设备）
 	var devices []model.Device
-	repository.DB.Scopes(ownedScope(c, "")).Where("id IN ?", req.DeviceIDs).Find(&devices)
+	repository.DB.Scopes(ownedScope(c, "")).Where("id IN ? AND product_id = ?", req.DeviceIDs, fw.ProductID).Find(&devices)
 	if len(devices) == 0 {
-		Fail(c, 400, "未找到有效设备")
+		Fail(c, 400, "未找到有效设备（需与固件同属一个产品）")
 		return
 	}
+	// 剔除不属于该产品的设备 ID，避免下发时越产品推送
+	validIDs := make([]uint, 0, len(devices))
+	validSet := make(map[uint]bool, len(devices))
+	for _, d := range devices {
+		validSet[d.ID] = true
+	}
+	for _, id := range req.DeviceIDs {
+		if validSet[id] {
+			validIDs = append(validIDs, id)
+		}
+	}
 
-	idsJSON, _ := json.Marshal(req.DeviceIDs)
+	idsJSON, _ := json.Marshal(validIDs)
 	task := model.OTATask{
 		UserID: UID(c), FirmwareID: fw.ID, ProductID: fw.ProductID,
 		DeviceIDs: string(idsJSON), Status: "running",
