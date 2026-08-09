@@ -61,13 +61,13 @@ type session struct {
 	codecScript string
 
 	// Modbus 请求-响应：有待响应请求时，匹配的帧路由到 waitCh
-	mu         sync.Mutex
-	waitCh     chan []byte
-	expSlave   byte  // 期望应答的从机地址
-	expFunc    byte  // 期望应答的功能码
-	expGen     int64 // 本次等待的请求 generation（防 A 超时后的迟到应答喂给 B，#19）
+	mu       sync.Mutex
+	waitCh   chan []byte
+	expSlave byte  // 期望应答的从机地址
+	expFunc  byte  // 期望应答的功能码
+	expGen   int64 // 本次等待的请求 generation（防 A 超时后的迟到应答喂给 B，#19）
 	// reqMu 串行化同一连接上的请求-响应（Modbus 半双工，多采集组/写操作并发时必须排队）
-	reqMu  sync.Mutex
+	reqMu sync.Mutex
 }
 
 // modbusGen 单调递增的请求 generation（per-connection），用于过滤超时请求的迟到应答（#19）
@@ -346,6 +346,9 @@ func handleConn(conn net.Conn) {
 
 	productKey, deviceName := d.ProductKey, d.Name
 	key := productKey + "." + deviceName
+	// QueueStatus 的 clientID 须经 ParseClientID 解析（与 MQTT 设备真实 clientID 同格式：
+	// {productKey}{deviceName} 纯拼接，无分隔符）。sessions map 仍用带点的 key 作为内部会话键。
+	clientID := productKey + deviceName
 
 	// 加载产品组帧/心跳配置
 	var p model.Product
@@ -368,7 +371,7 @@ func handleConn(conn net.Conn) {
 	sessions[key] = s
 	mu.Unlock()
 
-	service.QueueStatus(key, true, 0)
+	service.QueueStatus(clientID, true, 0)
 	if OnDeviceConnect != nil {
 		OnDeviceConnect(productKey, deviceName, d.ProductID)
 	}
@@ -380,7 +383,7 @@ func handleConn(conn net.Conn) {
 		if cur, ok := sessions[key]; ok && cur == s {
 			delete(sessions, key)
 			mu.Unlock()
-			service.QueueStatus(key, false, 0)
+			service.QueueStatus(clientID, false, 0)
 			if OnDeviceDisconnect != nil {
 				OnDeviceDisconnect(productKey, deviceName)
 			}

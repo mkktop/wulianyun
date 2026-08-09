@@ -94,7 +94,9 @@ func ConnectSimulator(c *gin.Context) {
 	simSessions[sessionID] = sess
 	simMu.Unlock()
 
-	clientID := fmt.Sprintf("%s.%s", p.ProductKey, d.Name)
+	// clientID 须为 {productKey}{deviceName} 纯拼接（与 MQTT 真实 clientID 同格式），
+	// 须经 ParseClientID 按字符数解析——勿加分隔点号
+	clientID := p.ProductKey + d.Name
 	service.QueueStatus(clientID, true, 0)
 	OK(c, sess)
 }
@@ -146,7 +148,8 @@ func DisconnectSimulator(c *gin.Context) {
 		return
 	}
 	if ok {
-		clientID := fmt.Sprintf("%s.%s", sess.ProductKey, sess.DeviceName)
+		// clientID 须为纯拼接（见 StartSimulator 同名注释）
+		clientID := sess.ProductKey + sess.DeviceName
 		service.QueueStatus(clientID, false, 0)
 	}
 	OK(c, nil)
