@@ -88,7 +88,7 @@ Content-Type: application/json
 |---|---|
 | `X-App-Key` | AppKey |
 | `X-Timestamp` | Unix 秒级（±5 分钟） |
-| `X-Sign` | `hex(HMAC-SHA256(AppSecret, AppKey + Timestamp))` |
+| `X-Sign` | `hex(HMAC-SHA256(AppSecret, Method\nPathAndQuery\nBodyHash\nAppKey\nTimestamp))` |
 
 ## 四、统一响应信封
 
@@ -107,10 +107,10 @@ Content-Type: application/json
 | **JWT 密钥** | 默认 `iot-platform-jwt-secret-change-me`，生产必须更换 |
 | **默认账号** | `admin/admin123`、MQTT 内部账号 `iot-platform-internal/internal-secret-2026`、DB `iot/iot123456` 均为演示值，生产必须替换 |
 | **EMQX 回调** | `/emqx/auth`、`/emqx/acl` 注册在公开路由组，须经内网/白名单保护 |
-| **OTA /uploads** | 公开静态下载（文件名随机化），如需保密请加鉴权 |
+| **OTA /uploads** | 公开静态下载（文件名随机化，强制附件方式下载），如需保密请加鉴权 |
 | **Webhook SSRF 防护** | 仅校验主机名字面量，不解析 DNS，无法防御域名解析到内网场景 |
 | **HTTP 上报无限流** | 生产环境建议边缘加限流 |
-| **OpenAPI 无防重放** | 签名仅覆盖 appKey+timestamp，无 nonce |
+| **OpenAPI 签名** | 签名覆盖 Method+PathAndQuery+BodyHash+AppKey+Timestamp，防篡改重放；同一请求在窗口内可原样重放，无 nonce |
 
 ## 六、Redis 键一览
 

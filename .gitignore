@@ -28,3 +28,7 @@ deploy/dist/.build/
 deploy/dist/*.tar.gz
 deploy/dist/*.tar.gz.sha256
 deploy/dist/kk-iot-*/
+
+# 构建/部署产物
+_kk/
+.build/

@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -94,7 +96,21 @@ func DeleteOpenApp(c *gin.Context) {
 // 请求头：
 //   X-App-Key:   应用 AppKey
 //   X-Timestamp: Unix 秒级时间戳（±5 分钟有效）
-//   X-Sign:      hex(HMAC-SHA256(appSecret, appKey + timestamp))
+//   X-Sign:      hex(HMAC-SHA256(appSecret, 待签名串))
+//
+// 待签名串 = Method + "\n" + PathAndQuery + "\n" + hex(SHA256(Body)) + "\n" + AppKey + "\n" + Timestamp
+// 覆盖 method/path/body 后，捕获的签名无法被改写为其他请求（防重放篡改）
+
+// openapiSignString 计算 OpenAPI 签名。
+// 待签名串 = Method + "\n" + PathAndQuery + "\n" + hex(SHA256(Body)) + "\n" + AppKey + "\n" + Timestamp
+// 覆盖 method/path/body 后，捕获的签名无法被改写为其他请求（防重放篡改）。
+// 提取为纯函数便于单元测试。
+func openapiSignString(appSecret, method, uri string, body []byte, appKey, ts string) string {
+	bodyHash := sha256.Sum256(body)
+	mac := hmac.New(sha256.New, []byte(appSecret))
+	mac.Write([]byte(method + "\n" + uri + "\n" + hex.EncodeToString(bodyHash[:]) + "\n" + appKey + "\n" + ts))
+	return hex.EncodeToString(mac.Sum(nil))
+}
 
 func OpenAPIAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -115,9 +131,10 @@ func OpenAPIAuth() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, Resp{Code: 401, Msg: "AppKey 无效或已禁用"})
 			return
 		}
-		mac := hmac.New(sha256.New, []byte(app.AppSecret))
-		mac.Write([]byte(appKey + tsStr))
-		expect := hex.EncodeToString(mac.Sum(nil))
+		// 读取并还原请求体，计算 body 哈希参与签名
+		bodyBytes, _ := io.ReadAll(c.Request.Body)
+		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		expect := openapiSignString(app.AppSecret, c.Request.Method, c.Request.URL.RequestURI(), bodyBytes, appKey, tsStr)
 		if !hmac.Equal([]byte(expect), []byte(sign)) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, Resp{Code: 401, Msg: "签名错误"})
 			return

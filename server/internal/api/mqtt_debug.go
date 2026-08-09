@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
 	"iot-platform/internal/mqtt"
@@ -17,12 +18,20 @@ var wsUpgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { re
 
 type mqttDebugSession struct {
 	conn *websocket.Conn
+	user string
 	subs map[string]paho.Token
 	send chan []byte
 	mu   sync.Mutex
 }
 
+// MqttDebugWS 平台内部 MQTT 调试台。
+// 安全约束：仅平台超管可用；禁止 $ 系统主题；publish 不允许通配符。
+// 该连接使用平台内部超级用户客户端，任意登录用户（含只读 viewer）不得触达。
 func MqttDebugWS(c *gin.Context) {
+	if !IsAdmin(c) {
+		Fail(c, 403, "仅平台超管可调试 MQTT")
+		return
+	}
 	conn, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		slog.Error("mqtt debug ws upgrade failed", "error", err)
@@ -30,6 +39,7 @@ func MqttDebugWS(c *gin.Context) {
 	}
 	sess := &mqttDebugSession{
 		conn: conn,
+		user: c.GetString("username"),
 		subs: make(map[string]paho.Token),
 		send: make(chan []byte, 64),
 	}
@@ -57,6 +67,12 @@ func (s *mqttDebugSession) readPump() {
 		if client == nil {
 			continue
 		}
+		// 主题白名单：拒绝 $ 系统主题；publish 拒绝通配符（EMQX 本身也拒绝通配 publish）
+		if strings.HasPrefix(cmd.Topic, "$") || (cmd.Action == "publish" && strings.ContainsAny(cmd.Topic, "+#")) {
+			s.pushMsg(map[string]interface{}{"direction": "err", "topic": cmd.Topic, "payload": "topic rejected"})
+			continue
+		}
+		slog.Info("mqtt debug op", "username", s.user, "action", cmd.Action, "topic", cmd.Topic)
 		switch cmd.Action {
 		case "publish":
 			client.Publish(cmd.Topic, byte(cmd.QoS), false, cmd.Payload)

@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -27,6 +28,24 @@ import (
 	"iot-platform/internal/repository"
 	"iot-platform/internal/service"
 )
+
+// errRegLineTooLong 注册行超过单缓冲（1024B）时返回，由上层拒绝连接
+var errRegLineTooLong = errors.New("registration line too long")
+
+// readRegLine 有界读取注册行。
+// 使用 ReadSlice 而非 ReadString：ReadSlice 在未遇换行且缓冲满时返回 ErrBufferFull
+// 且不分配增长缓冲（ReadString/ReadBytes 会持续扩容，可被无换行字节流撑爆内存）。
+// 未消费的数据仍留在 reader 缓冲中，供注册后的数据循环继续读取。
+func readRegLine(r *bufio.Reader) (string, error) {
+	line, err := r.ReadSlice('\n')
+	if errors.Is(err, bufio.ErrBufferFull) {
+		return "", errRegLineTooLong
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(line)), nil
+}
 
 type session struct {
 	conn       net.Conn
@@ -248,12 +267,17 @@ func handleConn(conn net.Conn) {
 	// 注册包鉴权
 	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	reader := bufio.NewReaderSize(conn, 1024)
-	line, err := reader.ReadString('\n')
+	// 有界读取：ReadSlice 在行超长时返回 ErrBufferFull 且不扩容缓冲，
+	// 防止恶意连接持续灌无换行字节导致内存膨胀（内存 DoS）
+	raw, err := readRegLine(reader)
+	if errors.Is(err, errRegLineTooLong) {
+		slog.Warn("registration line too long, rejected", "ip", remoteIP)
+		return
+	}
 	if err != nil {
 		return
 	}
-	parts := strings.Split(strings.TrimSpace(line), ",")
-	raw := strings.TrimSpace(line)
+	parts := strings.Split(raw, ",")
 	var d *model.Device
 	if len(parts) == 3 {
 		d, err = service.FindDeviceForAuth(parts[0], parts[1], parts[2])

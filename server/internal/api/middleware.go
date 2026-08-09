@@ -122,6 +122,17 @@ func PrimaryAuth() gin.HandlerFunc {
 	}
 }
 
+// AdminAuth 仅平台超管可通过（MQTT 调试台等超级权限工具）。
+func AdminAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !IsAdmin(c) {
+			c.AbortWithStatusJSON(http.StatusForbidden, Resp{Code: 403, Msg: "仅平台超管可操作"})
+			return
+		}
+		c.Next()
+	}
+}
+
 // RequireOperate 写操作保护（P2 账号内 RBAC）。
 // 平台超管/一级主账号恒放行；二级账号按 Permission 判定，view（只读）拒绝。
 // 权限实时从库读取（管理员改权限即时生效，无需二级重新登录）。

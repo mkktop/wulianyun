@@ -1,6 +1,8 @@
 package api
 
 import (
+	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -8,6 +10,34 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
+
+// onlyFilesFS 拒绝目录访问（与 gin.Static 行为一致），避免 /uploads 目录列举
+type onlyFilesFS struct{ fs http.FileSystem }
+
+func (fs onlyFilesFS) Open(name string) (http.File, error) {
+	f, err := fs.fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if stat, err := f.Stat(); err == nil && stat.IsDir() {
+		f.Close()
+		return nil, os.ErrNotExist
+	}
+	return f, nil
+}
+
+// uploadsDownload /uploads 静态文件下载：
+// 固定 Content-Type: application/octet-stream + Content-Disposition: attachment + nosniff，
+// 使任何上传内容（即使扩展名为 .html）都只能被下载、不能被浏览器同源渲染
+func uploadsDownload() gin.HandlerFunc {
+	fs := http.StripPrefix("/uploads", http.FileServer(onlyFilesFS{http.Dir("./uploads")}))
+	return func(c *gin.Context) {
+		c.Header("Content-Type", "application/octet-stream")
+		c.Header("Content-Disposition", "attachment")
+		c.Header("X-Content-Type-Options", "nosniff")
+		fs.ServeHTTP(c.Writer, c.Request)
+	}
+}
 
 func NewRouter() *gin.Engine {
 	r := gin.New()
@@ -85,7 +115,7 @@ func NewRouter() *gin.Engine {
 			auth.GET("/devices/:id/sub-devices", ListSubDevices)
 			auth.GET("/firmwares", ListFirmwares)
 			auth.GET("/ota-tasks", ListOTATasks)
-			auth.GET("/mqtt-debug/ws", MqttDebugWS)
+			auth.GET("/mqtt-debug/ws", AdminAuth(), MqttDebugWS)
 
 			// ---- 写操作（查看者账号被 RequireOperate 拦截）----
 			write := auth.Group("", RequireOperate())
@@ -168,7 +198,10 @@ func NewRouter() *gin.Engine {
 		open.POST("/devices/:id/command", SendCommand)
 	}
 	// 静态资源：OTA 固件下载（fileURL 形如 /uploads/firmware/...）；文件名含时间戳+产品ID随机化
-	r.Static("/uploads", "./uploads")
+	// 强制以附件方式下载（octet-stream + attachment + nosniff），防止上传文件被同源渲染（存储型 XSS）
+	r.GET("/uploads/*filepath", uploadsDownload())
+	// 上传目录本身也禁止列目录/访问目录
+	r.GET("/uploads", func(c *gin.Context) { c.Status(http.StatusNotFound) })
 
 	return r
 }

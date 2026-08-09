@@ -120,7 +120,9 @@ const autoScroll = ref(true)
 
 function getWsUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${location.host}${api.mqttDebug.wsUrl}`
+  // WS 握手无法携带 Authorization 头，token 走 query 参数（仅平台超管可访问该端点）
+  const token = localStorage.getItem('token') || ''
+  return `${proto}//${location.host}${api.mqttDebug.wsUrl}?token=${encodeURIComponent(token)}`
 }
 
 function connectWs() {

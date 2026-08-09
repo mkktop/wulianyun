@@ -24,13 +24,23 @@
 |---|---|
 | `X-App-Key` | 应用 AppKey |
 | `X-Timestamp` | Unix **秒级**时间戳（±5 分钟有效） |
-| `X-Sign` | `hex(HMAC-SHA256(AppSecret, AppKey + Timestamp))` |
+| `X-Sign` | `hex(HMAC-SHA256(AppSecret, 待签名串))` |
 
 ### 签名计算
 
+待签名串覆盖 **Method + PathAndQuery + BodyHash**，防止捕获的签名被改写为其他请求：
+
 ```text
-待签名串 = AppKey + Timestamp          （直接字符串拼接，无分隔符）
-签名     = hex(HMAC-SHA256(AppSecret, 待签名串))
+BodyHash   = hex(SHA256(请求体))                      （GET 无请求体时为空串的哈希）
+待签名串    = Method + "\n" + PathAndQuery + "\n" + BodyHash + "\n" + AppKey + "\n" + Timestamp
+PathAndQuery = 请求路径（含 query，如 /openapi/v1/devices/3/latest）
+签名        = hex(HMAC-SHA256(AppSecret, 待签名串))
+```
+
+示例：`GET /openapi/v1/devices/3/latest?size=10`、`appKey=ak3f8a1c...`、`ts=1785712345`：
+
+```text
+待签名串 = GET\n/openapi/v1/devices/3/latest?size=10\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nak3f8a1c...\n1785712345
 ```
 
 ### 校验流程
@@ -45,24 +55,29 @@
 ```js
 const crypto = require('crypto')
 
-function sign(appKey, appSecret, ts) {
+// 待签名串 = Method\nPathAndQuery\nBodyHash\nAppKey\nTimestamp
+function sign(method, pathAndQuery, body, appKey, appSecret, ts) {
+  const bodyHash = crypto.createHash('sha256').update(body).digest('hex')
   const mac = crypto.createHmac('sha256', appSecret)
-  mac.update(appKey + ts)
+  mac.update(`${method}\n${pathAndQuery}\n${bodyHash}\n${appKey}\n${ts}`)
   return mac.digest('hex')
 }
 
 const appKey = 'ak3f8a1c...'
 const appSecret = 'c9d2f1e8...'
 const ts = Math.floor(Date.now() / 1000)
+const path = '/openapi/v1/devices'
 
-const res = await fetch(`http://<平台地址>/openapi/v1/devices`, {
+const res = await fetch(`http://<平台地址>${path}`, {
   headers: {
     'X-App-Key': appKey,
     'X-Timestamp': String(ts),
-    'X-Sign': sign(appKey, appSecret, ts),
+    'X-Sign': sign('GET', path, '', appKey, appSecret, ts),
   },
 })
 ```
+
+> POST 请求时 `pathAndQuery` 需包含 query 字符串、`body` 传请求体原始字符串，且两端必须与发出请求完全一致（签名绑定 method/path/body）。
 
 ### 示例（Python）
 
@@ -72,10 +87,13 @@ import time, hmac, hashlib, requests
 app_key = "ak3f8a1c..."
 app_secret = "c9d2f1e8..."
 ts = str(int(time.time()))
-sign = hmac.new(app_secret.encode(), (app_key + ts).encode(), hashlib.sha256).hexdigest()
+path = "/openapi/v1/devices"
+body_hash = hashlib.sha256(b"").hexdigest()
+raw = f"GET\n{path}\n{body_hash}\n{app_key}\n{ts}"
+sign = hmac.new(app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
 
 r = requests.get(
-    "http://<平台地址>/openapi/v1/devices",
+    "http://<平台地址>" + path,
     headers={"X-App-Key": app_key, "X-Timestamp": ts, "X-Sign": sign},
 )
 print(r.json())

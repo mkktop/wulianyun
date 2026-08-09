@@ -2,7 +2,7 @@
   <el-card shadow="never">
     <div class="toolbar">
       <el-alert type="info" :closable="false" style="flex: 1; margin-right: 16px">
-        OpenAPI 签名：X-App-Key + X-Timestamp(秒) + X-Sign = HMAC-SHA256(AppSecret, AppKey+Timestamp)，接口前缀 /openapi/v1
+        OpenAPI 签名：X-App-Key + X-Timestamp(秒) + X-Sign = HMAC-SHA256(AppSecret, Method\nPath\nBodyHash\nAppKey\nTimestamp)，接口前缀 /openapi/v1
       </el-alert>
       <el-button type="primary" @click="dialogVisible = true">
         <el-icon><Plus /></el-icon>&nbsp;创建应用

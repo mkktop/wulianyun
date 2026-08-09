@@ -98,10 +98,14 @@ const crypto = require('crypto')
 const appKey = 'ak3f8a1c...'
 const appSecret = 'c9d2f1e8...'
 const ts = Math.floor(Date.now() / 1000)
+const method = 'GET'
+const path = '/openapi/v1/devices/3/latest'
+const bodyHash = crypto.createHash('sha256').update('').digest('hex')
+// 待签名串 = Method\nPathAndQuery\nBodyHash\nAppKey\nTimestamp
 const sign = crypto.createHmac('sha256', appSecret)
-  .update(appKey + ts).digest('hex')
+  .update(`${method}\n${path}\n${bodyHash}\n${appKey}\n${ts}`).digest('hex')
 
-const res = await fetch(`http://<平台地址>/openapi/v1/devices/3/latest`, {
+const res = await fetch(`http://<平台地址>${path}`, {
   headers: {
     'X-App-Key': appKey,
     'X-Timestamp': String(ts),
@@ -119,10 +123,13 @@ import time, hmac, hashlib, requests
 app_key = "ak3f8a1c..."
 app_secret = "c9d2f1e8..."
 ts = str(int(time.time()))
-sign = hmac.new(app_secret.encode(), (app_key + ts).encode(), hashlib.sha256).hexdigest()
+path = "/openapi/v1/devices/3/latest"
+body_hash = hashlib.sha256(b"").hexdigest()
+raw = f"GET\n{path}\n{body_hash}\n{app_key}\n{ts}"
+sign = hmac.new(app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
 
 r = requests.get(
-    "http://<平台地址>/openapi/v1/devices/3/latest",
+    "http://<平台地址>" + path,
     headers={"X-App-Key": app_key, "X-Timestamp": ts, "X-Sign": sign},
 )
 print(r.json())

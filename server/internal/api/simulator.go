@@ -38,14 +38,20 @@ func ConnectSimulator(c *gin.Context) {
 		Fail(c, 1, err.Error())
 		return
 	}
+	// 归属校验：产品必须可写定义（owner/超管），设备必须在可见范围内且属于该产品，
+	// 防止跨租户冒认设备（IDOR）
+	p, err := mustOwnProduct(c, req.ProductID)
+	if err != nil {
+		Fail(c, 1, "product not found")
+		return
+	}
 	var d model.Device
-	if err := repository.DB.First(&d, req.DeviceID).Error; err != nil {
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", req.DeviceID).First(&d).Error; err != nil {
 		Fail(c, 1, "device not found")
 		return
 	}
-	var p model.Product
-	if err := repository.DB.First(&p, req.ProductID).Error; err != nil {
-		Fail(c, 1, "product not found")
+	if d.ProductID != p.ID {
+		Fail(c, 1, "设备不属于该产品")
 		return
 	}
 
@@ -79,6 +85,11 @@ func PublishSimulator(c *gin.Context) {
 		Fail(c, 1, "session not found or disconnected")
 		return
 	}
+	// 会话归属校验：只能向自己创建的模拟会话下发
+	if sess.UserID != UID(c) {
+		Fail(c, 1, "session not found")
+		return
+	}
 	payload, _ := json.Marshal(req.Payload)
 	go service.HandleTelemetry(sess.ProductKey, sess.DeviceName, payload)
 	OK(c, gin.H{"status": "sent"})
@@ -99,6 +110,11 @@ func DisconnectSimulator(c *gin.Context) {
 		delete(simSessions, req.SessionID)
 	}
 	simMu.Unlock()
+	// 会话归属校验：只能断开自己创建的模拟会话
+	if ok && sess.UserID != UID(c) {
+		Fail(c, 1, "session not found")
+		return
+	}
 	if ok {
 		clientID := fmt.Sprintf("%s.%s", sess.ProductKey, sess.DeviceName)
 		service.QueueStatus(clientID, false, 0)

@@ -21,6 +21,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// firmwareExtAllowed 固件上传扩展名白名单（防止上传 .html 等被同源静态渲染）
+var firmwareExtAllowed = map[string]bool{
+	".bin": true, ".hex": true, ".img": true, ".dat": true,
+	".zip": true, ".tar": true, ".gz": true, ".pack": true, ".rbl": true,
+}
+
 func ListFirmwares(c *gin.Context) {
 	q := repository.DB.Scopes(ownedScope(c, ""))
 	if pid := c.Query("productId"); pid != "" {
@@ -88,6 +94,12 @@ func CreateFirmware(c *gin.Context) {
 			}
 			return '_'
 		}, header.Filename)
+		// 扩展名白名单：只允许固件二进制类型，杜绝 .html/.svg 等被同源渲染（存储型 XSS）
+		ext := strings.ToLower(filepath.Ext(safeName))
+		if !firmwareExtAllowed[ext] {
+			Fail(c, 400, "仅支持固件文件类型（bin/hex/img/zip/tar/gz/pack 等）")
+			return
+		}
 		filename := fmt.Sprintf("%d_%s_%d_%s", productID, version, time.Now().Unix(), safeName)
 		// 确保 filepath.Join 后仍在 dir 下
 		dst := filepath.Join(dir, filename)

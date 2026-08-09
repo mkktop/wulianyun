@@ -47,6 +47,12 @@ func EmqxAuth(c *gin.Context) {
 			c.JSON(200, gin.H{"result": "deny"})
 			return
 		}
+		// token 与 clientid 绑定：token 只允许其签发设备使用，
+		// 防止设备 A 持 token 冒认设备 B 的 clientid（跨设备/跨租户截获下行）
+		if d.ProductKey != productKey || d.Name != deviceName {
+			c.JSON(200, gin.H{"result": "deny"})
+			return
+		}
 	} else {
 		// 固定 Secret 认证
 		d, err = service.FindDeviceForAuth(productKey, deviceName, req.Password)
