@@ -258,12 +258,10 @@ curl http://localhost/api/v1/overview
 
 ### OTA 固件无法下载
 
-确认 `router.go` 已包含 `r.Static("/uploads", "./uploads")`，且 `uploads` 卷已挂载。测试：
+固件存储由 `storage` 配置决定，按模式排查：
 
-```bash
-# 上传固件后，从浏览器访问返回的 fileURL
-curl -I http://<服务器IP>/uploads/firmware/xxx
-```
+- **local 模式**（默认）：确认 `uploads` 卷已挂载（docker-compose 中 server 服务）。测试：`curl -I http://<服务器IP>/uploads/firmware/xxx`
+- **s3 模式**：确认桶已手动创建并设为**公开读**，且 `endpoint / bucket / access_key / secret_key` 配置正确；服务器启动时即校验桶连通性（失败会拒绝启动）。可用 `curl -I http://<bucket>.<endpoint>/firmware/xxx` 直接验证对象可匿名访问
 
 ### 重置管理员密码
 

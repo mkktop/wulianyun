@@ -48,6 +48,8 @@ func Init() error {
 		&model.MessageTrace{}, &model.DeviceLog{},
 		&model.Firmware{}, &model.OTATask{},
 		&model.ProductGrant{},
+		&model.Announcement{}, &model.HelpDoc{}, &model.SystemSetting{},
+		&model.StorageConfig{},
 	); err != nil {
 		return err
 	}
@@ -100,26 +102,27 @@ func Init() error {
 
 // cleanupLoop 定期清理消息轨迹和设备日志
 func cleanupLoop() {
-	traceDays := config.C.Log.TraceRetentionDays
-	if traceDays <= 0 {
-		traceDays = 7
-	}
-	logDays := config.C.Log.DeviceLogRetentionDays
-	if logDays <= 0 {
-		logDays = 30
-	}
-
 	// 启动后立即执行一次
-	doCleanup(traceDays, logDays)
+	doCleanup()
 
 	ticker := time.NewTicker(6 * time.Hour)
 	defer ticker.Stop()
 	for range ticker.C {
-		doCleanup(traceDays, logDays)
+		doCleanup()
 	}
 }
 
-func doCleanup(traceDays, logDays int) {
+// doCleanup 按当前生效的保留天数清理（热更新参数可覆盖 yaml 默认值，每次执行时读取）
+func doCleanup() {
+	traceDays := GetSettingInt("trace_retention_days", config.C.Log.TraceRetentionDays)
+	if traceDays <= 0 {
+		traceDays = 7
+	}
+	logDays := GetSettingInt("device_log_retention_days", config.C.Log.DeviceLogRetentionDays)
+	if logDays <= 0 {
+		logDays = 30
+	}
+
 	cutoff := time.Now().AddDate(0, 0, -traceDays)
 	if result := DB.Where("created_at < ?", cutoff).Delete(&model.MessageTrace{}); result.Error != nil {
 		slog.Warn("cleanup old traces failed", "err", result.Error)

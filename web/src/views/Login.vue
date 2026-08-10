@@ -66,6 +66,7 @@ async function submit() {
     } else {
       const { token, user } = await api.login(form)
       localStorage.setItem('token', token)
+      localStorage.setItem('userId', String(user.id || ''))
       localStorage.setItem('username', user.nickname || user.username)
       localStorage.setItem('tier', computeTier(user))
       localStorage.setItem('perm', user.permission || 'operate')

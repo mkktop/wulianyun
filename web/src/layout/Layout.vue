@@ -33,6 +33,16 @@
         <el-menu-item index="/screen">
           <el-icon><DataBoard /></el-icon><template #title><span>可视化大屏</span></template>
         </el-menu-item>
+        <!-- 平台超管专属后台（仅 admin 角色可见；后端 AdminAuth 兜底拦截） -->
+        <el-sub-menu v-if="tier === 'platform'" index="system">
+          <template #title><el-icon><Setting /></el-icon><span>系统管理</span></template>
+          <el-menu-item index="/console/system/status">系统状态</el-menu-item>
+          <el-menu-item index="/console/system/config">参数配置</el-menu-item>
+          <el-menu-item index="/console/system/announcements">公告管理</el-menu-item>
+          <el-menu-item index="/console/system/help-docs">帮助中心</el-menu-item>
+          <el-menu-item index="/console/system/users">用户管理</el-menu-item>
+          <el-menu-item index="/console/system/logs">全局日志</el-menu-item>
+        </el-sub-menu>
         <el-sub-menu index="tools">
           <template #title><el-icon><Monitor /></el-icon><span>开发工具</span></template>
           <el-menu-item index="/console/tools/simulator">设备模拟器</el-menu-item>
@@ -59,6 +69,10 @@
         </div>
         <div class="header-right">
           <Clock />
+          <!-- 公告铃铛：有新发布公告时显示红点，点击查看全部 -->
+          <el-badge :value="unreadCount" :max="99" :hidden="unreadCount === 0" class="ann-badge">
+            <el-icon :size="18" class="bell" @click="openAnnouncements"><Bell /></el-icon>
+          </el-badge>
           <el-dropdown @command="onCommand">
             <span class="user">
               <span class="avatar">{{ username.slice(0, 1).toUpperCase() }}</span>
@@ -103,6 +117,23 @@
         <el-button type="primary" :loading="pwdLoading" @click="submitPassword">确认修改</el-button>
       </template>
     </el-dialog>
+
+    <!-- 平台公告（已发布，所有登录账号可见） -->
+    <el-dialog v-model="annVisible" title="平台公告" width="640px">
+      <div v-if="announcements.length === 0" class="ann-empty">暂无公告</div>
+      <div
+        v-for="a in announcements" :key="a.id"
+        class="ann-item" :class="{ important: a.level === 'important', expanded: expandedAnn === a.id }"
+      >
+        <div class="ann-row" @click="toggleAnn(a.id)">
+          <span class="ann-title">{{ a.title }}</span>
+          <el-tag v-if="a.level === 'important'" size="small" type="danger">重要</el-tag>
+          <span class="ann-meta">{{ a.publisher }} · {{ formatTime(a.publishAt) }}</span>
+          <el-icon class="ann-arrow"><component :is="expandedAnn === a.id ? 'ArrowUp' : 'ArrowDown'" /></el-icon>
+        </div>
+        <div v-if="expandedAnn === a.id && a.content" class="ann-content" v-html="md(a.content)"></div>
+      </div>
+    </el-dialog>
   </el-container>
 </template>
 
@@ -110,9 +141,10 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElNotification, type FormInstance, type FormRules } from 'element-plus'
+import { marked } from 'marked'
 import { realtime } from '../utils/realtime'
 import { debounce } from '../utils/debounce'
-import { api } from '../api'
+import { api, type Announcement } from '../api'
 import Clock from '../components/Clock.vue'
 
 const route = useRoute()
@@ -156,8 +188,43 @@ function onMsg(msg: any) {
 const tier = ref(localStorage.getItem('tier') || 'primary')
 const perm = ref(localStorage.getItem('perm') || 'operate')
 
+// ---- 平台公告 ----
+const announcements = ref<Announcement[]>([])
+const annVisible = ref(false)
+// 已读最新公告 id 用响应式 ref 驱动红点（localStorage 非响应式，直接读会导致已读后红点不消失）
+const readAnnId = ref(Number(localStorage.getItem('announcementReadId') || 0))
+const unreadCount = computed(() => announcements.value.filter((a) => a.id > readAnnId.value).length)
+
+// 公告内容为超管维护的 markdown（可信内容），marked 渲染
+const md = (text: string) => marked.parse(text) as string
+const formatTime = (t: string | null) => (t ? new Date(t).toLocaleString('zh-CN') : '')
+
+async function loadAnnouncements() {
+  try {
+    announcements.value = (await api.announcements.list()) || []
+  } catch { /* 公告加载失败不阻塞页面 */ }
+}
+
+function openAnnouncements() {
+  annVisible.value = true
+  // 标记当前所有公告为已读（红点立即消失）
+  if (announcements.value.length) {
+    readAnnId.value = announcements.value[0].id
+    localStorage.setItem('announcementReadId', String(readAnnId.value))
+    // 默认展开第一条，方便直接看最新公告
+    expandedAnn.value = announcements.value[0].id
+  }
+}
+
+// 公告详情展开/折叠（点标题行切换）
+const expandedAnn = ref<number | null>(null)
+function toggleAnn(id: number) {
+  expandedAnn.value = expandedAnn.value === id ? null : id
+}
+
 onMounted(async () => {
   realtime.on(onMsg)
+  loadAnnouncements()
   // 拉取最新 tier/权限：管理员调整二级权限后，二级刷新页面即生效
   try {
     const p = await api.profile()
@@ -220,6 +287,7 @@ function onCommand(cmd: string) {
   } else if (cmd === 'logout') {
     realtime.close()
     localStorage.removeItem('token')
+    localStorage.removeItem('userId')
     localStorage.removeItem('username')
     localStorage.removeItem('tier')
     localStorage.removeItem('perm')
@@ -259,6 +327,29 @@ function onCommand(cmd: string) {
 }
 .header-left { display: flex; align-items: center; gap: 14px; }
 .header-right { display: flex; align-items: center; gap: 18px; }
+.bell { cursor: pointer; color: #606266; transition: color .2s; }
+.bell:hover { color: #409EFF; }
+.ann-badge { display: flex; align-items: center; }
+.ann-empty { text-align: center; color: #999; padding: 24px 0; }
+.ann-item { padding: 4px 0; border-bottom: 1px solid #f0f0f0; }
+.ann-item:last-child { border-bottom: none; }
+.ann-item.important .ann-title { color: #f56c6c; }
+.ann-row {
+  display: flex; align-items: center; gap: 8px; padding: 10px 8px;
+  cursor: pointer; border-radius: 4px; transition: background 0.15s;
+}
+.ann-row:hover { background: #f5f7fa; }
+.ann-title { font-weight: 600; color: #303133; }
+.ann-meta { margin-left: auto; color: #c0c4cc; font-size: 12px; }
+.ann-arrow { color: #c0c4cc; font-size: 12px; }
+.ann-content {
+  color: #606266; font-size: 13px; line-height: 1.7;
+  padding: 8px 12px 12px; background: #fafafa; border-radius: 4px; margin: 0 8px 8px;
+}
+.ann-content :deep(p) { margin: 4px 0; }
+.ann-content :deep(h1), .ann-content :deep(h2), .ann-content :deep(h3) { margin: 10px 0 4px; }
+.ann-content :deep(ul), .ann-content :deep(ol) { padding-left: 20px; }
+.ann-content :deep(code) { background: #f0f2f5; padding: 1px 4px; border-radius: 3px; }
 .collapse-btn { cursor: pointer; color: #606266; transition: color .2s; }
 .collapse-btn:hover { color: #409EFF; }
 .user { display: flex; align-items: center; gap: 6px; cursor: pointer; color: #333; }

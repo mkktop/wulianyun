@@ -119,6 +119,11 @@ func NewRouter() *gin.Engine {
 			auth.GET("/ota-tasks", ListOTATasks)
 			auth.GET("/mqtt-debug/ws", AdminAuth(), MqttDebugWS)
 
+			// 用户侧：公告与帮助中心（只读）
+			auth.GET("/announcements", ListPublishedAnnouncements)
+			auth.GET("/help-docs", ListHelpDocs)
+			auth.GET("/help-docs/:key", GetHelpDoc)
+
 			// ---- 写操作（查看者账号被 RequireOperate 拦截）----
 			write := auth.Group("", RequireOperate())
 			{
@@ -177,6 +182,32 @@ func NewRouter() *gin.Engine {
 				primary.GET("/products/:id/grants", ListGrants)
 				primary.POST("/products/:id/grants", CreateGrant)
 				primary.DELETE("/products/:id/grants/:sid", DeleteGrant)
+			}
+
+			// 平台超管专属后台（系统状态/配置/热更新参数/公告/帮助中心/全量用户管理/全局日志）
+			admin := auth.Group("", AdminAuth())
+			{
+				admin.GET("/admin/system/status", SystemStatus)
+				admin.GET("/admin/system/config", SystemConfig)
+				admin.GET("/admin/system/settings", ListSystemSettings)
+				admin.PUT("/admin/system/settings", UpdateSystemSetting)
+				admin.GET("/admin/system/storage", GetStorageConfig)
+				admin.PUT("/admin/system/storage", UpdateStorageConfig)
+
+				admin.GET("/admin/announcements", ListAdminAnnouncements)
+				admin.POST("/admin/announcements", CreateAnnouncement)
+				admin.PUT("/admin/announcements/:id", UpdateAnnouncement)
+				admin.DELETE("/admin/announcements/:id", DeleteAnnouncement)
+
+				admin.GET("/admin/help-docs", ListAdminHelpDocs)
+				admin.POST("/admin/help-docs", CreateHelpDoc)
+				admin.PUT("/admin/help-docs/:id", UpdateHelpDoc)
+				admin.DELETE("/admin/help-docs/:id", DeleteHelpDoc)
+
+				admin.GET("/admin/users", ListAdminUsers)
+				admin.POST("/admin/users", CreateAdminUser)
+				admin.PUT("/admin/users/:id", UpdateAdminUser)
+				admin.DELETE("/admin/users/:id", DeleteAdminUser)
 			}
 
 			// 开发者工具（模拟器会产生下行/上报，属写操作）

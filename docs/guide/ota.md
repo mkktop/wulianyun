@@ -10,7 +10,7 @@
  管理员 ──POST /api/v1/firmwares──► 上传固件（multipart，平台计算 SHA-256）
  管理员 ──POST /api/v1/ota-tasks──► 创建升级任务（选固件 + 设备列表）
  平台   ──thing/down/{pk}/{dn}──► 设备  {"method":"ota.push", version, url, size, sha256, taskId}（QoS 1）
- 设备   ──HTTP GET url──────────► 平台  /uploads/firmware/...（公开下载，无鉴权，强制附件下载）
+ 设备   ──HTTP GET url──────────► 本地模式：平台 /uploads/firmware/...；s3 模式：对象存储直连（公开读桶）
  设备   ──thing/up/{pk}/{dn}/ota─► 平台  {"method":"ota.progress", taskId, progress, status}
  平台   任务状态：running → completed / failed
 ```
@@ -54,15 +54,33 @@ Content-Type: multipart/form-data
 
 ### 文件 URL 格式
 
+固件存储由 `storage` 配置决定（`local` 本地磁盘 / `s3` 对象存储），URL 形态随模式不同：
+
+**local 模式**（默认，单机部署）
+
 ```
 /uploads/firmware/{产品数字ID}_{版本}_{unix时间戳}_{安全化文件名}
 ```
 
-例：`/uploads/firmware/1_1.0.3_1720000000_app.bin`
+例：`/uploads/firmware/1_1.0.3_1720000000_app.bin`，设备需拼接平台地址（`http://<平台地址> + url`）下载，为强制附件（`Content-Type: application/octet-stream` + `Content-Disposition: attachment`），任何扩展名都不会被浏览器渲染。
+
+**s3 模式**（S3 兼容对象存储：阿里 OSS / 腾讯 COS / MinIO）
+
+```
+http://{bucket}.{endpoint}/firmware/{产品数字ID}_{版本}_{unix时间戳}_{8位随机hex}_{安全化文件名}
+```
+
+例：`http://wulian-ota.oss-cn-hangzhou.aliyuncs.com/firmware/1_1.0.3_1720000000_a3f9x7k2_app.bin`
+
+- 桶需设为**公开读**；对象名含随机串不可猜测，防越权下载
+- URL **短而永久有效**（无签名、无过期），适配 4G 模组/嵌入式 HTTP 栈；设备直连对象存储（可前置 CDN），平台不承载下载流量
+- 多实例部署天然共享；`public_domain` 可配置 CDN/自定义域名
+
+两种模式共同点：
 
 - 原文件名只保留字母数字 `.` `_` `-`，其余替换为 `_`
-- 下载为**强制附件**（`Content-Type: application/octet-stream` + `Content-Disposition: attachment`），任何扩展名都不会被浏览器渲染
-- 固件上传扩展名白名单：`.bin .hex .img .dat .zip .tar .gz .pack .rbl`；单文件上限 512 MB
+- 上传扩展名白名单：`.bin .hex .img .dat .zip .tar .gz .pack .rbl`；单文件上限 512 MB
+- 上传时平台自动计算 SHA-256，随 `ota.push` 下发给设备校验
 
 ## 三、创建升级任务
 
@@ -102,7 +120,10 @@ Content-Type: application/json
 
 ### 4.2 下载固件
 
-设备直接 HTTP GET `url`（完整地址为 `http://<平台地址> + url`），下载后校验 SHA-256。
+- **local 模式**：设备直接 HTTP GET `url`（完整地址为 `http://<平台地址> + url`）
+- **s3 模式**：`url` 即为对象存储的完整公开地址（或 CDN 域名），设备直接 GET 即可
+
+下载后校验 SHA-256（与 `ota.push` 中 `sha256` 字段比对）。
 
 ### 4.3 上报进度（上行）
 

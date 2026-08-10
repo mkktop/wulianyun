@@ -69,3 +69,18 @@ log:
 # 详见 server/deploy/emqx/rules/README.md
 emqx_rule:
   enabled: false
+
+# 固件对象存储：local 本地磁盘（默认，单机部署）；s3 对接 S3 兼容对象存储（阿里 OSS / 腾讯 COS / MinIO）
+# s3 模式优势：多实例共享、设备直连下载不占平台带宽；桶需设为公开读（对象名含随机串不可猜测）
+# 上线前先手动建桶并配置公开读策略，再填以下参数
+storage:
+  type: local
+  local_dir: "uploads"
+  # ---- s3 模式参数（type 为 s3 时必填）----
+  endpoint: "${OSS_ENDPOINT}"            # 如 oss-cn-hangzhou.aliyuncs.com（不带协议）
+  region: "${OSS_REGION}"                # AWS 必填；阿里 OSS 可留空
+  bucket: "${OSS_BUCKET}"                # 桶名，需公开读
+  access_key: "${OSS_ACCESS_KEY}"
+  secret_key: "${OSS_SECRET_KEY}"
+  use_ssl: false                          # 注意廉价 4G 模组 TLS 兼容性，默认 http
+  public_domain: "${OSS_PUBLIC_DOMAIN}"   # 公开下载域名（CDN），空则用 bucket.endpoint

@@ -58,6 +58,7 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: 'OTA 升级', link: '/guide/ota' },
+            { text: '超管后台（系统管理）', link: '/guide/admin-console' },
             { text: '开放平台 OpenAPI', link: '/guide/openapi' },
             { text: 'OpenAPI 字段参考', link: '/guide/api-reference' },
             { text: '错误码与响应参考', link: '/guide/errors' },

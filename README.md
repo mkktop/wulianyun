@@ -90,6 +90,7 @@
 - OpenAPI（`/openapi/v1`）HMAC-SHA256 签名鉴权，复用管理端能力
 - 平台内置设备模拟器、MQTT 调试台、消息轨迹（分阶段耗时）、设备日志
 - 可视化大屏（KPI + 实时告警）、Vue3 管理后台
+- **超管后台**（admin 专属）：系统运行状态、热更新参数（注册开关/令牌有效期/日志保留）、平台公告、帮助中心在线编辑、全量用户管理、跨账号全局日志检索
 - EMQX 规则引擎直写 TimescaleDB 快路径，后端跳过 DB 写入
 
 ---
@@ -563,7 +564,7 @@ tools/simulator/        设备模拟器（MQTT / TCP透传 / TCP+Modbus）
 - **默认管理员** `admin/admin123`、**MQTT 内部账号** `iot-platform-internal/internal-secret-2026`、**数据库** `iot/iot123456` 均为演示值，生产环境务必替换。
 - **EMQX 鉴权回调**（`/emqx/auth`、`/emqx/acl`）注册在公开路由组，须通过内网/白名单保护，避免外网伪造 `allow`。
 - **Webhook SSRF 防护**仅校验主机名字面量（禁止 localhost、`169.254.169.254`、回环与链路本地地址），不解析 DNS，无法防御域名解析到内网的场景。
-- **OTA 通知多实例盲区**：OTA 下发经单实例 `DownPublisher`，若目标 TCP 连接在其它实例会 fallback 到 MQTT，纯 TCP/透传设备可能收不到 `ota.push`。
+- **OTA 通知多实例盲区**：OTA 下发经单实例 `DownPublisher`，若目标 TCP 连接在其它实例会 fallback 到 MQTT，纯 TCP/透传设备可能收不到 `ota.push`（固件下载本身不受影响——local 模式下文件仅存于接收上传的实例，多实例请启用 s3 对象存储）。
 - `mqtt.tls.insecure_skip_verify` 默认 `true`，生产启用 TLS 时应关闭并配置 CA 证书。
 
 ---

@@ -28,6 +28,13 @@ const router = createRouter({
         { path: 'tools/simulator', component: () => import('../views/DeviceSimulator.vue'), meta: { title: '设备模拟器' } },
         { path: 'tools/mqtt-debug', component: () => import('../views/MqttDebug.vue'), meta: { title: 'MQTT调试台' } },
         { path: 'tools/traces', component: () => import('../views/MessageTraces.vue'), meta: { title: '消息轨迹' } },
+        // 平台超管专属后台（系统管理，仅 admin 角色可访问；后端 AdminAuth 兜底）
+        { path: 'system/status', component: () => import('../views/system/SystemStatus.vue'), meta: { title: '系统状态', admin: true } },
+        { path: 'system/config', component: () => import('../views/system/SystemConfig.vue'), meta: { title: '参数配置', admin: true } },
+        { path: 'system/announcements', component: () => import('../views/system/Announcements.vue'), meta: { title: '公告管理', admin: true } },
+        { path: 'system/help-docs', component: () => import('../views/system/HelpDocs.vue'), meta: { title: '帮助中心', admin: true } },
+        { path: 'system/users', component: () => import('../views/system/AdminUsers.vue'), meta: { title: '用户管理', admin: true } },
+        { path: 'system/logs', component: () => import('../views/system/SystemLogs.vue'), meta: { title: '全局日志', admin: true } },
         // /console 下未匹配路径（含旧链接转换来的）统一回落控制台首页，避免与顶层兜底构成重定向环
         { path: ':pathMatch(.*)*', redirect: '/console/overview' }
       ]
@@ -44,6 +51,10 @@ router.beforeEach((to) => {
   // 公开页面：/（官网首页）、/login；其余（含 /console/*）需要登录
   if (!token && to.path !== '/login' && to.path !== '/') return '/login'
   if (token && to.path === '/login') return '/console/overview'
+  // 系统管理（admin 专属）页面：非超管账号重定向回控制台首页（后端 AdminAuth 兜底拦截）
+  if (to.meta.admin && localStorage.getItem('tier') !== 'platform') {
+    return '/console/overview'
+  }
 })
 
 export default router

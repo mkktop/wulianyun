@@ -20,6 +20,7 @@ import (
 	"iot-platform/internal/repository"
 	"iot-platform/internal/rule"
 	"iot-platform/internal/service"
+	"iot-platform/internal/storage"
 	"iot-platform/internal/ws"
 )
 
@@ -41,6 +42,21 @@ func main() {
 	}
 	if err := repository.Init(); err != nil {
 		slog.Error("init database failed", "err", err)
+		os.Exit(1)
+	}
+	// 固件对象存储（local 本地磁盘 | s3 对象存储），启动即校验桶可用
+	if err := storage.Init(storage.Options{
+		Type:         config.C.Storage.Type,
+		LocalDir:     config.C.Storage.LocalDir,
+		Endpoint:     config.C.Storage.Endpoint,
+		Region:       config.C.Storage.Region,
+		Bucket:       config.C.Storage.Bucket,
+		AccessKey:    config.C.Storage.AccessKey,
+		SecretKey:    config.C.Storage.SecretKey,
+		UseSSL:       config.C.Storage.UseSSL,
+		PublicDomain: config.C.Storage.PublicDomain,
+	}); err != nil {
+		slog.Error("init storage failed", "err", err)
 		os.Exit(1)
 	}
 

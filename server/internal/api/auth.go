@@ -34,6 +34,11 @@ var dummyPasswordHash = func() []byte {
 // @Failure      400  {object}  Resp
 // @Router       /auth/register [post]
 func Register(c *gin.Context) {
+	// 热更新参数：开放注册开关（超管后台可关闭）
+	if !repository.GetSettingBool("register_enabled", true) {
+		Fail(c, 403, "平台暂未开放注册，请联系管理员开通账号")
+		return
+	}
 	var req authReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, 400, "用户名至少3位，密码至少6位")

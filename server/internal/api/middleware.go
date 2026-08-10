@@ -22,10 +22,12 @@ type Claims struct {
 }
 
 func GenToken(uid uint, username, role string, parentID *uint) (string, error) {
+	// 热更新参数：令牌有效期可被超管后台覆盖（未设置则回退 yaml 配置）
+	expireHours := repository.GetSettingInt("jwt_expire_hours", config.C.JWT.ExpireHours)
 	claims := Claims{
 		UserID: uid, Username: username, Role: role, ParentID: parentID,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(config.C.JWT.ExpireHours) * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(expireHours) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}

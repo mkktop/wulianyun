@@ -76,6 +76,17 @@ type Config struct {
 	EMQXRule struct {
 		Enabled bool `yaml:"enabled"` // EMQX 规则引擎接管遥测入库，后端跳过 DB 写入
 	} `yaml:"emqx_rule"`
+	Storage struct {
+		Type         string `yaml:"type"`          // 固件对象存储：local（本地磁盘，默认）| s3（S3 兼容：阿里 OSS/腾讯 COS/MinIO）
+		LocalDir     string `yaml:"local_dir"`     // local 模式存储根目录，默认 uploads
+		Endpoint     string `yaml:"endpoint"`      // s3 模式：服务端点（如 oss-cn-hangzhou.aliyuncs.com，不带协议）
+		Region       string `yaml:"region"`        // s3 模式：区域（AWS 必填，阿里 OSS 可留空）
+		Bucket       string `yaml:"bucket"`        // s3 模式：桶名（需设为公开读，设备直连下载）
+		AccessKey    string `yaml:"access_key"`    // s3 模式：AccessKey
+		SecretKey    string `yaml:"secret_key"`    // s3 模式：SecretKey
+		UseSSL       bool   `yaml:"use_ssl"`       // s3 模式：https 访问（注意廉价 4G 模组 TLS 兼容性，默认 http）
+		PublicDomain string `yaml:"public_domain"` // s3 模式：公开下载域名（CDN/自定义域名），空则用 bucket.endpoint
+	} `yaml:"storage"`
 }
 
 var C Config

@@ -516,6 +516,13 @@ func Has(productKey, deviceName string) bool {
 	return ok
 }
 
+// ConnCount 当前 TCP 网关在线连接数（超管后台系统状态用）
+func ConnCount() int {
+	mu.RLock()
+	defer mu.RUnlock()
+	return len(sessions)
+}
+
 // Send 下行数据：脚本有 encode 则编码为二进制，否则透传原始 JSON
 func Send(productKey, deviceName string, payload []byte) error {
 	mu.RLock()

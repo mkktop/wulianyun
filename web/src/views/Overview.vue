@@ -1,5 +1,18 @@
 <template>
   <div>
+    <!-- 平台公告（已发布） -->
+    <el-card v-if="announcements.length" shadow="never" class="announce-card">
+      <div class="announce-inner">
+        <el-icon class="announce-icon" color="#E6A23C"><BellFilled /></el-icon>
+        <div class="announce-body">
+          <div v-for="a in announcements.slice(0, 3)" :key="a.id" class="announce-item">
+            <span class="announce-title" :class="{ important: a.level === 'important' }">{{ a.title }}</span>
+            <span class="announce-meta">{{ fmtDate(a.publishAt) }}</span>
+          </div>
+        </div>
+      </div>
+    </el-card>
+
     <el-row :gutter="16">
       <el-col :span="4" v-for="card in cards" :key="card.label">
         <el-card shadow="hover" class="stat-card" :body-style="{ padding: '0' }">
@@ -40,11 +53,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import echarts from '../utils/echarts'
-import { api } from '../api'
+import { api, type Announcement } from '../api'
 import { realtime } from '../utils/realtime'
 import { debounce } from '../utils/debounce'
+import { fmtDate } from '../utils/format'
 
 const data = ref<any>({ productCount: 0, deviceCount: 0, onlineCount: 0, onlineRate: 0, msgToday: 0, msgTotal: 0, msgRateMin: 0, msgTrend: [], statusDist: [] })
+const announcements = ref<Announcement[]>([])
 const chartRef = ref<HTMLElement>()
 const pieRef = ref<HTMLElement>()
 const chart = shallowRef<echarts.ECharts>()
@@ -121,6 +136,8 @@ const onResize = () => { chart.value?.resize(); pie.value?.resize() }
 
 onMounted(() => {
   load()
+  // 平台公告（失败静默，不影响概览）
+  api.announcements.list().then((list) => { announcements.value = list || [] }).catch(() => {})
   realtime.on(onMsg)
   window.addEventListener('resize', onResize)
 })
@@ -150,4 +167,12 @@ onUnmounted(() => {
 .card-head { font-weight: 600; }
 .chart-card { border-radius: 10px; }
 .chart { height: 340px; }
+.announce-card { margin-bottom: 16px; border-radius: 10px; }
+.announce-inner { display: flex; align-items: flex-start; gap: 12px; }
+.announce-icon { font-size: 22px; margin-top: 2px; }
+.announce-body { flex: 1; min-width: 0; }
+.announce-item { display: flex; align-items: center; gap: 10px; line-height: 1.9; }
+.announce-title { color: #303133; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.announce-title.important { color: #f56c6c; font-weight: 600; }
+.announce-meta { color: #c0c4cc; font-size: 12px; flex-shrink: 0; }
 </style>

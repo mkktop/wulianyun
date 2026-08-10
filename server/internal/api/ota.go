@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -8,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,6 +18,7 @@ import (
 	"iot-platform/internal/mqtt"
 	"iot-platform/internal/repository"
 	"iot-platform/internal/service"
+	"iot-platform/internal/storage"
 
 	"github.com/gin-gonic/gin"
 )
@@ -90,8 +91,6 @@ func CreateFirmware(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err == nil {
 		defer file.Close()
-		dir := filepath.Join("uploads", "firmware")
-		os.MkdirAll(dir, 0755)
 		// 安全文件名：只保留字母数字和点，防止路径穿越
 		safeName := strings.Map(func(r rune) rune {
 			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
@@ -105,28 +104,24 @@ func CreateFirmware(c *gin.Context) {
 			Fail(c, 400, "仅支持固件文件类型（bin/hex/img/zip/tar/gz/pack 等）")
 			return
 		}
-		filename := fmt.Sprintf("%d_%s_%d_%s", productID, version, time.Now().Unix(), safeName)
-		// 确保 filepath.Join 后仍在 dir 下
-		dst := filepath.Join(dir, filename)
-		if !strings.HasPrefix(filepath.Clean(dst), filepath.Clean(dir)+string(filepath.Separator)) {
-			Fail(c, 400, "非法文件名")
+		// 对象名：firmware/{产品ID}_{版本}_{时间戳}_{随机串}_{文件名}
+		// 随机串使 URL 不可猜测（公开读桶下代替签名防越权下载），且 URL 短而永久，适配 4G 模组
+		randBytes := make([]byte, 4)
+		if _, err := rand.Read(randBytes); err != nil {
+			Fail(c, 500, "生成对象名失败")
 			return
 		}
-		out, err := os.Create(dst)
-		if err != nil {
+		key := fmt.Sprintf("firmware/%d_%s_%d_%x_%s",
+			productID, version, time.Now().Unix(), randBytes, safeName)
+
+		// 边传边算 SHA-256 checksum（与本地模式一致，设备下载后据此校验完整性）
+		hasher := sha256.New()
+		if err := storage.Default.Put(c.Request.Context(), key, io.TeeReader(file, hasher), header.Size); err != nil {
+			slog.Error("store firmware failed", "key", key, "err", err)
 			Fail(c, 500, "保存文件失败")
 			return
 		}
-
-		// 同时计算 SHA-256 checksum
-		hasher := sha256.New()
-		_, err = io.Copy(io.MultiWriter(out, hasher), file)
-		out.Close()
-		if err != nil {
-			Fail(c, 500, "写入文件失败")
-			return
-		}
-		fileURL = "/" + filepath.ToSlash(dst)
+		fileURL = storage.Default.URL(key)
 		fileSize = header.Size
 		checksum = hex.EncodeToString(hasher.Sum(nil))
 	}
@@ -140,25 +135,31 @@ func CreateFirmware(c *gin.Context) {
 		Checksum:    checksum,
 		Description: description,
 	}
-	repository.DB.Create(&fw)
+	if err := repository.DB.Create(&fw).Error; err != nil {
+		// 记录入库失败时回收已存储的对象，避免产生孤儿文件
+		if key := storage.Default.KeyFromURL(fileURL); key != "" {
+			if derr := storage.Default.Delete(c.Request.Context(), key); derr != nil {
+				slog.Warn("cleanup firmware object failed", "key", key, "err", derr)
+			}
+		}
+		Fail(c, 500, "保存固件记录失败")
+		return
+	}
 	OK(c, fw)
 }
 
-// DeleteFirmware 删除固件（同时删除物理文件）
+// DeleteFirmware 删除固件（同时删除存储对象）
 func DeleteFirmware(c *gin.Context) {
 	var fw model.Firmware
 	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", c.Param("id")).First(&fw).Error; err != nil {
 		Fail(c, 404, "固件不存在")
 		return
 	}
-	// 删除物理文件（安全拼接，防止路径穿越）
+	// 删除存储对象（本地磁盘 / 对象存储统一走 storage 抽象；URL 非本存储返回空 key 则跳过）
 	if fw.FileURL != "" {
-		path := "." + fw.FileURL
-		cleanPath := filepath.Clean(path)
-		baseDir := filepath.Clean(filepath.Join(".", "uploads", "firmware"))
-		if strings.HasPrefix(cleanPath, baseDir+string(filepath.Separator)) {
-			if err := os.Remove(cleanPath); err != nil && !os.IsNotExist(err) {
-				slog.Warn("delete firmware file failed", "path", cleanPath, "err", err)
+		if key := storage.Default.KeyFromURL(fw.FileURL); key != "" {
+			if err := storage.Default.Delete(c.Request.Context(), key); err != nil {
+				slog.Warn("delete firmware file failed", "key", key, "err", err)
 			}
 		}
 	}

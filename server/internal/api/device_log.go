@@ -40,6 +40,7 @@ func ListAllDeviceLogs(c *gin.Context) {
 	var params struct {
 		DeviceID uint   `form:"deviceId"`
 		Category string `form:"category"`
+		Keyword  string `form:"keyword"` // payload 内容模糊搜索（超管后台全局日志检索用）
 		Page     int    `form:"page,default=1"`
 		Size     int    `form:"size,default=20"`
 	}
@@ -57,6 +58,9 @@ func ListAllDeviceLogs(c *gin.Context) {
 	}
 	if params.Category != "" {
 		q = q.Where("category = ?", params.Category)
+	}
+	if params.Keyword != "" {
+		q = q.Where("summary ILIKE ? OR payload ILIKE ?", "%"+params.Keyword+"%", "%"+params.Keyword+"%")
 	}
 
 	var total int64

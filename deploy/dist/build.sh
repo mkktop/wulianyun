@@ -71,7 +71,7 @@ for ARCH in "${ARCHES[@]}"; do
   # ---- server 二进制（Go 原生交叉编译，无需 QEMU）+ 薄镜像 ----
   echo "  · 编译 server ($ARCH) ..."
   ( cd "$SERVER" && GOOS=linux GOARCH="$ARCH" "$GO_BIN" build \
-      -trimpath -ldflags="-s -w" -o "$BUILD/server-$ARCH" ./cmd/server )
+      -trimpath -ldflags="-s -w -X iot-platform/internal/api.Version=$VERSION" -o "$BUILD/server-$ARCH" ./cmd/server )
   SRV_CTX="$BUILD/ctx-server-$ARCH"
   mkdir -p "$SRV_CTX/configs"
   cp "$BUILD/server-$ARCH" "$SRV_CTX/server"

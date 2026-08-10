@@ -66,3 +66,19 @@ log:
 # 启用前需先在 EMQX Dashboard 中配置数据桥接（见 deploy/emqx/rules/README.md）
 emqx_rule:
   enabled: false
+
+# 固件对象存储：local 本地磁盘（默认）；s3 对接 S3 兼容对象存储（阿里 OSS / 腾讯 COS / MinIO）
+# s3 模式下桶需设为公开读，设备直连下载固件（URL 短而永久，适配 4G 模组）
+# 本地联调可用 MinIO：endpoint 填 localhost:9000，use_ssl: false
+storage:
+  type: local
+  # local 模式存储根目录（默认 uploads）
+  local_dir: "uploads"
+  # ---- 以下为 s3 模式参数 ----
+  endpoint: ""            # 如 oss-cn-hangzhou.aliyuncs.com（不带协议）
+  region: ""              # AWS 必填；阿里 OSS 可留空
+  bucket: ""              # 桶名，需公开读
+  access_key: ""
+  secret_key: ""
+  use_ssl: false          # 注意廉价 4G 模组 TLS 兼容性，默认 http
+  public_domain: ""       # 公开下载域名（CDN），空则用 bucket.endpoint

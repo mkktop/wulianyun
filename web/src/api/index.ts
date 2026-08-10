@@ -436,4 +436,97 @@ export const api = {
     addSubDevice: (gatewayId: number, data: any) => http.post(`/devices/${gatewayId}/sub-devices`, data),
     removeSubDevice: (gatewayId: number, deviceId: number) => http.delete(`/devices/${gatewayId}/sub-devices/${deviceId}`),
   },
+  // ---- 公告 / 帮助中心（所有登录账号只读）----
+  announcements: {
+    list: () => http.get('/announcements') as Promise<Announcement[]>,
+  },
+  helpDocs: {
+    list: () => http.get('/help-docs') as Promise<{ id: number; key: string; title: string }[]>,
+    get: (key: string) => http.get(`/help-docs/${key}`) as Promise<{ key: string; title: string; content: string }>,
+  },
+  // ---- 平台超管后台（系统管理，仅 admin 角色）----
+  admin: {
+    systemStatus: () => http.get('/admin/system/status') as Promise<any>,
+    systemConfig: () => http.get('/admin/system/config') as Promise<Record<string, any>>,
+    settings: {
+      list: () => http.get('/admin/system/settings') as Promise<SystemSettingItem[]>,
+      update: (data: { key: string; value: string }) => http.put('/admin/system/settings', data),
+    },
+    storage: {
+      get: () => http.get('/admin/system/storage') as Promise<StorageConfig>,
+      update: (data: any) => http.put('/admin/system/storage', data),
+    },
+    announcements: {
+      list: () => http.get('/admin/announcements') as Promise<Announcement[]>,
+      create: (data: any) => http.post('/admin/announcements', data) as Promise<Announcement>,
+      update: (id: number, data: any) => http.put(`/admin/announcements/${id}`, data),
+      remove: (id: number) => http.delete(`/admin/announcements/${id}`),
+    },
+    helpDocs: {
+      list: () => http.get('/admin/help-docs') as Promise<HelpDocItem[]>,
+      create: (data: any) => http.post('/admin/help-docs', data) as Promise<HelpDocItem>,
+      update: (id: number, data: any) => http.put(`/admin/help-docs/${id}`, data),
+      remove: (id: number) => http.delete(`/admin/help-docs/${id}`),
+    },
+    users: {
+      list: (params: any) => http.get('/admin/users', { params }) as Promise<Page<AdminUser>>,
+      create: (data: any) => http.post('/admin/users', data) as Promise<AdminUser>,
+      update: (id: number, data: any) => http.put(`/admin/users/${id}`, data),
+      remove: (id: number) => http.delete(`/admin/users/${id}`),
+    },
+  },
+}
+
+export interface Announcement {
+  id: number
+  title: string
+  content: string
+  level: string
+  status: string
+  publishAt: string | null
+  createdAt: string
+  publisher?: string
+}
+
+export interface SystemSettingItem {
+  key: string
+  value: string
+  type: string
+  description: string
+  updatedAt: string
+}
+
+export interface StorageConfig {
+  type: string
+  localDir: string
+  endpoint: string
+  region: string
+  bucket: string
+  accessKey: string
+  hasSecretKey: boolean
+  useSSL: boolean
+  publicDomain: string
+  updatedAt: string
+}
+
+export interface HelpDocItem {
+  id: number
+  key: string
+  title: string
+  content: string
+  updatedAt: string
+}
+
+export interface AdminUser {
+  id: number
+  username: string
+  nickname: string
+  role: string
+  parentId?: number | null
+  parentName?: string
+  tier: string
+  status: string
+  permission: string
+  deviceCount: number
+  createdAt: string
 }
