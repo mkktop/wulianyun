@@ -162,7 +162,7 @@ node dtu-modbus.js <productId> <deviceName> <deviceSecret>
 | 项 | 约定 |
 |---|---|
 | Broker | `tcp://<host>:1883` |
-| ClientID | `{productId}.{deviceName}` |
+| ClientID | `{productId}{deviceName}`（纯拼接，无分隔符；前 12 字符为产品ID） |
 | Username | `{deviceName}` |
 | Password | 设备 Secret，或动态 Token（`tk:` 开头） |
 | 遗嘱(LWT) | 发布到 `thing/offline/{productId}/{deviceName}`，TCP 断开秒级离线 |
@@ -336,12 +336,12 @@ function encode(obj) {
 | 事件上报 | `{method:"event.post", identifier, type, params}` | — |
 | 远程配置拉取 | `{method:"config.get"}` | `{method:"config.push", version, params}` |
 | NTP 对时 | `{method:"ntp.request", deviceSendTime}` | `{method:"ntp.response", deviceSendTime, serverRecvTime, serverSendTime}` |
-| OTA 下发 | — | `{method:"ota.push", version, url, size, sha256, taskId, ts}` |
+| OTA 下发 | — | `{method:"ota.push", version, url, size, sha256, crc32, taskId, ts}` |
 | OTA 进度 | `{method:"ota.progress", taskId, progress, status}` | — |
 
 ### OTA 升级
 
-1. 上传固件（`POST /api/v1/firmwares`，multipart，自动计算 SHA-256）
+1. 上传固件（`POST /api/v1/firmwares`，multipart，自动计算 SHA-256 + CRC32）
 2. 创建升级任务（`POST /api/v1/ota-tasks`，选择固件 + 设备列表）
 3. 平台下发 `ota.push`；设备通过 `thing/up/{pk}/{dn}/ota` 上报进度
 4. 任务状态：`running` →（`success`）`completed` /（`failed`）`failed`
@@ -444,6 +444,12 @@ function encode(obj) {
 | `log.trace_retention_days` | `7` | 天 | 消息轨迹保留 |
 | `log.device_log_retention_days` | `30` | 天 | 设备日志保留 |
 | `emqx_rule.enabled` | `false` | - | EMQX 规则引擎接管遥测入库（快路径） |
+| `storage.type` | `local` | - | 固件对象存储：`local` 本地磁盘 / `s3`（阿里 OSS/腾讯 COS/MinIO） |
+| `storage.local_dir` | `uploads` | - | local 模式存储根目录 |
+| `storage.endpoint` / `region` / `bucket` | `""` | - | s3 模式：endpoint（不带协议）/ region（AWS 必填，阿里 OSS 可空）/ 桶名（需公开读） |
+| `storage.access_key` / `secret_key` | `""` | - | s3 模式：访问密钥 |
+| `storage.use_ssl` | `false` | - | s3 是否走 HTTPS（注意 4G 模组 TLS 兼容性，默认 HTTP） |
+| `storage.public_domain` | `""` | - | s3 公开下载域名（CDN），空则用 `bucket.endpoint` |
 
 ---
 
@@ -564,7 +570,7 @@ tools/simulator/        设备模拟器（MQTT / TCP透传 / TCP+Modbus）
 - **默认管理员** `admin/admin123`、**MQTT 内部账号** `iot-platform-internal/internal-secret-2026`、**数据库** `iot/iot123456` 均为演示值，生产环境务必替换。
 - **EMQX 鉴权回调**（`/emqx/auth`、`/emqx/acl`）注册在公开路由组，须通过内网/白名单保护，避免外网伪造 `allow`。
 - **Webhook SSRF 防护**仅校验主机名字面量（禁止 localhost、`169.254.169.254`、回环与链路本地地址），不解析 DNS，无法防御域名解析到内网的场景。
-- **OTA 通知多实例盲区**：OTA 下发经单实例 `DownPublisher`，若目标 TCP 连接在其它实例会 fallback 到 MQTT，纯 TCP/透传设备可能收不到 `ota.push`（固件下载本身不受影响——local 模式下文件仅存于接收上传的实例，多实例请启用 s3 对象存储）。
+- **OTA 通知送达边界**：`ota.push` 严格按设备接入协议选路——TCP/DTU 设备在线走网关（多实例经 Redis 频道 `tcp:down` 扇出），MQTT 设备走 EMQX（QoS 1）；设备离线如实计入未送达，**不再回退其它协议**（`ota.push` 非 retained、不重发，错过的设备不会自动补送）。固件下载在多实例下需启用 s3 对象存储——local 模式文件仅存于接收上传的实例。
 - `mqtt.tls.insecure_skip_verify` 默认 `true`，生产启用 TLS 时应关闭并配置 CA 证书。
 
 ---

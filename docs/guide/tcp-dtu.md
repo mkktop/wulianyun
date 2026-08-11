@@ -125,7 +125,7 @@ function encode(obj) {
 - **rawType**：`int16 / uint16(默认) / int32 / uint32 / float`（占 2 寄存器，大端）、`bool / bits`
 - **取值换算**：`raw * scale + offset`
 - **采集组**（分频）：同组点位共享 `pollInterval` 与 `reportMode`（`periodic` 全量 / `onchange` 仅变更）；未分组点位归默认组（id=0，用产品 `pollInterval`）
-- **轮询引擎**：合并连续寄存器批量读（`maxGap=8`、读寄存器上限 120）、单请求超时 3s、并发上限 50；多实例部署时平台保证同一设备组仅一个实例采集
+- **轮询引擎**：合并连续寄存器批量读（`maxGap=8`、读寄存器上限 120）、单请求超时**产品级可配**（`requestTimeout`，默认 3s、钳制 3-30s，控制台 Modbus 产品表单设置）、并发上限 50；多实例部署时平台保证同一设备组仅一个实例采集
 
 ## 八、限流与容错
 
