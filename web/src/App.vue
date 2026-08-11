@@ -25,9 +25,11 @@ body {
 /* ---- 表格空状态美化 ---- */
 .el-table__empty-text { color: #909399; font-size: 13px; line-height: 60px; }
 
-/* ---- 路由切换动画（纯淡入淡出，避免位移/跳高造成的“弹一下”） ---- */
+/* ---- 路由切换动画：交叉淡入（离开的页面绝对定位脱离文档流，新页面原位淡入，
+   既无“从底部顶上来”的位移，也无 mode=out-in 的白屏间隙） ---- */
+.router-wrap { position: relative; }
 .page-fade-enter-active { transition: opacity .2s ease; }
-.page-fade-leave-active { transition: opacity .12s ease; }
+.page-fade-leave-active { transition: opacity .15s ease; position: absolute; top: 0; left: 0; right: 0; }
 .page-fade-enter-from { opacity: 0; }
 .page-fade-leave-to { opacity: 0; }
 </style>

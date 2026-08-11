@@ -41,6 +41,7 @@ Content-Type: multipart/form-data
     "fileUrl": "/uploads/firmware/1_1.0.3_1720000000_app.bin",
     "fileSize": 102400,
     "checksum": "a1b2c3...",
+    "crc32": 3735928559,
     "createdAt": "..."
   }
 }
@@ -51,6 +52,7 @@ Content-Type: multipart/form-data
 | `fileUrl` | 固件下载路径（`/uploads/firmware/...`） |
 | `fileSize` | 文件字节数 |
 | `checksum` | SHA-256 校验和（十六进制） |
+| `crc32` | CRC32/IEEE 校验值（无符号 32 位整数，0~4294967295）。旧固件为 0 表示无 CRC32 |
 
 ### 文件 URL 格式
 
@@ -80,7 +82,7 @@ http://{bucket}.{endpoint}/firmware/{产品数字ID}_{版本}_{unix时间戳}_{8
 
 - 原文件名只保留字母数字 `.` `_` `-`，其余替换为 `_`
 - 上传扩展名白名单：`.bin .hex .img .dat .zip .tar .gz .pack .rbl`；单文件上限 512 MB
-- 上传时平台自动计算 SHA-256，随 `ota.push` 下发给设备校验
+- 上传时平台自动计算 SHA-256 + CRC32/IEEE，随 `ota.push` 下发给设备校验
 
 ## 三、创建升级任务
 
@@ -94,7 +96,7 @@ Content-Type: application/json
 - 任务按**设备数字 ID 列表**指定目标设备（非按产品）
 - 目标设备必须与固件属于**同一产品**，不属于该产品的设备 ID 会被剔除
 - 任务状态初始为 `running`
-- 创建后立即向每个目标设备下发 `ota.push` 通知（优先 TCP 通道，回退 MQTT，QoS 1）
+- 创建后立即向每个目标设备下发 `ota.push` 通知，**按设备接入协议选路**：TCP/DTU 设备走网关（在线直发，多实例走 Redis 扇出），MQTT 设备走 EMQX（QoS 1）。设备离线时该台计入未送达，不再回退到其它协议
 
 响应：
 
@@ -113,17 +115,22 @@ Content-Type: application/json
   "url": "/uploads/firmware/1_1.0.3_1720000000_app.bin",
   "size": 102400,
   "sha256": "a1b2c3...",
+  "crc32": 3735928559,
   "taskId": 1,
   "ts": 1785712345678
 }
 ```
+
+| 字段 | 说明 |
+|---|---|
+| `crc32` | CRC32/IEEE 校验值，无符号 32 位整数（0~4294967295）。**值为 0 表示该固件无 CRC32**（旧固件），请仅校验 `sha256`；非 0 时建议先做 CRC32 快速校验，再做 SHA-256 完整性校验 |
 
 ### 4.2 下载固件
 
 - **local 模式**：设备直接 HTTP GET `url`（完整地址为 `http://<平台地址> + url`）
 - **s3 模式**：`url` 即为对象存储的完整公开地址（或 CDN 域名），设备直接 GET 即可
 
-下载后校验 SHA-256（与 `ota.push` 中 `sha256` 字段比对）。
+下载后校验完整性：**`crc32` 非 0 时先做 CRC32 快速校验**（低算力设备友好），再校验 **SHA-256**（与 `ota.push` 中对应字段比对）。`crc32` 为 0 的旧固件仅校验 `sha256`。
 
 ### 4.3 上报进度（上行）
 

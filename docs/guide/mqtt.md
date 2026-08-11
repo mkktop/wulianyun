@@ -113,7 +113,7 @@ payload 中带字符串 `method` 字段时，平台按方法分流：
 | 透传命令 | 请求体原始 JSON 原样下发，无包裹 | 由管理端/OpenAPI 下发 |
 | 远程配置 | `{"method":"config.push","version":N,"params":{...}}` | 走广播 `thing/broadcast/{pk}` |
 | NTP 对时 | `{"method":"ntp.response","deviceSendTime":<ms>,"serverRecvTime":<ms>,"serverSendTime":<ms>}` | |
-| OTA 升级 | `{"method":"ota.push","version":"...","url":"...","size":N,"sha256":"...","taskId":N,"ts":<ms>}` | 见 [OTA升级](/guide/ota) |
+| OTA 升级 | `{"method":"ota.push","version":"...","url":"...","size":N,"sha256":"...","crc32":N,"taskId":N,"ts":<ms>}` | 见 [OTA升级](/guide/ota) |
 
 > 所有下行均为 QoS 1、非 retained（`…/retained` 主题除外）。设备收到 `property.set` 后应**立即上报新值**，平台据此清除影子 desired。
 

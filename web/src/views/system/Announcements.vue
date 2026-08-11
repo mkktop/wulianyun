@@ -1,11 +1,11 @@
 <template>
-  <el-card shadow="never">
-    <div class="toolbar">
-      <span class="desc">公告发布后，控制台所有登录账号在顶部铃铛与概览页可见；内容支持 markdown</span>
+  <div class="system-page">
+    <SysPageHeader title="公告管理" desc="发布后所有登录账号在顶部铃铛与概览页可见；内容支持 markdown" icon="BellFilled">
       <el-button type="primary" @click="openCreate">
         <el-icon><Plus /></el-icon>&nbsp;新建公告
       </el-button>
-    </div>
+    </SysPageHeader>
+    <div class="sp-card"><div class="sp-card-body">
 
     <el-table :data="list" v-loading="loading" stripe>
       <el-table-column prop="title" label="标题" min-width="200">
@@ -46,6 +46,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </div></div>
 
     <!-- 新建/编辑公告 -->
     <el-dialog v-model="editVisible" :title="editForm.id ? '编辑公告' : '新建公告'" width="720px" :close-on-click-modal="false">
@@ -87,7 +88,7 @@
         <div class="detail-content" v-html="renderMd(detailRow.content)"></div>
       </template>
     </el-drawer>
-  </el-card>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -97,6 +98,7 @@ import { marked } from 'marked'
 import { api, type Announcement } from '../../api'
 import { fmtDateTime } from '../../utils/format'
 import MdEditor from '../../components/MdEditor.vue'
+import SysPageHeader from '../../components/SysPageHeader.vue'
 
 const list = ref<Announcement[]>([])
 const loading = ref(false)

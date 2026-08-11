@@ -1,6 +1,7 @@
 <template>
-  <el-card shadow="never">
-    <template #header><span>全局日志检索（平台超管：可跨账号检索任意设备的日志与消息轨迹）</span></template>
+  <div class="system-page">
+    <SysPageHeader title="全局日志" desc="跨账号检索任意设备的日志与消息轨迹" icon="Document" />
+    <div class="sp-card"><div class="sp-card-body">
 
     <el-tabs v-model="tab">
       <!-- 设备日志 -->
@@ -101,6 +102,7 @@
         />
       </el-tab-pane>
     </el-tabs>
+    </div></div>
 
     <!-- 设备日志详情 -->
     <el-dialog v-model="logDrawer" title="日志详情" width="620px">
@@ -131,13 +133,14 @@
         <div class="payload" v-if="currentTrace.payload">{{ currentTrace.payload }}</div>
       </template>
     </el-drawer>
-  </el-card>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { api } from '../../api'
 import { fmtDateTime } from '../../utils/format'
+import SysPageHeader from '../../components/SysPageHeader.vue'
 
 const tab = ref('logs')
 

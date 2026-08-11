@@ -144,6 +144,6 @@ Content-Type: application/json
 | 协议 | 报文 |
 |---|---|
 | NTP 对时 | `{"method":"ntp.response","deviceSendTime":<ms>,"serverRecvTime":<ms>,"serverSendTime":<ms>}` |
-| OTA 升级 | `{"method":"ota.push","version":"...","url":"...","size":N,"sha256":"...","taskId":N,"ts":<ms>}` |
+| OTA 升级 | `{"method":"ota.push","version":"...","url":"...","size":N,"sha256":"...","crc32":N,"taskId":N,"ts":<ms>}` |
 
 > 详见 [OTA升级](/guide/ota)。

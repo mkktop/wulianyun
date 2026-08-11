@@ -25,6 +25,11 @@
                 <el-text size="small" type="info">{{ row.checksum ? row.checksum.substring(0, 16) + '...' : '-' }}</el-text>
               </template>
             </el-table-column>
+            <el-table-column label="CRC32" width="130" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-text size="small" type="info">{{ row.crc32 ? '0x' + row.crc32.toString(16).padStart(8, '0').toUpperCase() : '-' }}</el-text>
+              </template>
+            </el-table-column>
             <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
             <el-table-column label="上传时间" width="170">
               <template #default="{ row }">{{ fmt(row.createdAt) }}</template>

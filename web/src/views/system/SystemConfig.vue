@@ -1,8 +1,10 @@
 <template>
-  <el-card shadow="never">
-    <div class="toolbar">
-      <span class="desc">热更新参数修改后立即生效；基础设施参数（存储/MQTT/数据库等）只读展示，需改 config.yaml 并重启服务</span>
-    </div>
+  <div class="system-page">
+    <SysPageHeader title="参数配置" desc="热更新参数修改后立即生效；基础设施参数需改 config.yaml 重启" icon="Setting" />
+
+    <div class="sp-card">
+      <div class="sp-card-header"><span><el-icon><Tools /></el-icon>热更新参数</span></div>
+      <div class="sp-card-body">
 
     <!-- 热更新参数 -->
     <el-table :data="settings" v-loading="loading" stripe>
@@ -28,17 +30,20 @@
         </template>
       </el-table-column>
     </el-table>
+      </div>
+    </div>
 
     <!-- 对象存储配置（可编辑并热生效） -->
-    <el-card shadow="never" class="storage-card">
-      <template #header>
+    <div class="sp-card storage-card">
+      <div class="sp-card-header">
         <div class="storage-head">
-          <span class="group-title">对象存储</span>
+          <span><el-icon><Files /></el-icon>对象存储</span>
           <el-tag v-if="storage.type === 's3'" type="warning" size="small">S3 兼容</el-tag>
           <el-tag v-else size="small">本地磁盘</el-tag>
           <span class="storage-hint">修改后立即生效（新上传固件走新配置，已存固件不受影响）</span>
         </div>
-      </template>
+      </div>
+      <div class="sp-card-body">
       <el-form :model="storage" label-width="110px" class="storage-form">
         <el-form-item label="存储类型">
           <el-radio-group v-model="storage.type">
@@ -85,10 +90,13 @@
           <span v-if="storage.updatedAt" class="storage-updated">上次修改：{{ storage.updatedAt }}</span>
         </el-form-item>
       </el-form>
-    </el-card>
+      </div>
+    </div>
 
     <!-- 全部配置只读展示 -->
-    <el-divider content-position="left">当前生效配置（只读，敏感项已打码）</el-divider>
+    <div class="sp-card">
+      <div class="sp-card-header"><span><el-icon><Document /></el-icon>当前生效配置（只读，敏感项已打码）</span></div>
+      <div class="sp-card-body">
     <el-collapse v-model="openSections">
       <el-collapse-item v-for="(group, name) in config" :key="name" :name="name">
         <template #title>
@@ -102,6 +110,8 @@
         </el-descriptions>
       </el-collapse-item>
     </el-collapse>
+      </div>
+    </div>
 
     <!-- 修改参数 -->
     <el-dialog v-model="editVisible" title="修改参数" width="440px" :close-on-click-modal="false">
@@ -128,13 +138,14 @@
         <el-button type="primary" :loading="saving" @click="doSave">保存</el-button>
       </template>
     </el-dialog>
-  </el-card>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, type SystemSettingItem, type StorageConfig } from '../../api'
+import SysPageHeader from '../../components/SysPageHeader.vue'
 
 const settings = ref<SystemSettingItem[]>([])
 const config = ref<Record<string, Record<string, unknown>>>({})

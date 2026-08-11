@@ -1,11 +1,11 @@
 <template>
-  <el-card shadow="never">
-    <div class="toolbar">
-      <span class="desc">帮助中心文档（markdown 入库、前端渲染），控制台所有登录账号可在「帮助」中查看</span>
+  <div class="system-page">
+    <SysPageHeader title="帮助中心" desc="markdown 入库、前端渲染，登录账号可查看" icon="Reading">
       <el-button type="primary" @click="openCreate">
         <el-icon><Plus /></el-icon>&nbsp;新建文档
       </el-button>
-    </div>
+    </SysPageHeader>
+    <div class="sp-card"><div class="sp-card-body">
 
     <el-table :data="list" v-loading="loading" stripe>
       <el-table-column prop="key" label="标识" min-width="160">
@@ -24,6 +24,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </div></div>
 
     <!-- 新建/编辑文档 -->
     <el-dialog v-model="editVisible" :title="editForm.id ? '编辑文档' : '新建文档'" width="720px" :close-on-click-modal="false">
@@ -43,7 +44,7 @@
         <el-button type="primary" :loading="saving" @click="doSave">保存</el-button>
       </template>
     </el-dialog>
-  </el-card>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -52,6 +53,7 @@ import { ElMessage } from 'element-plus'
 import { api, type HelpDocItem } from '../../api'
 import { fmtDateTime } from '../../utils/format'
 import MdEditor from '../../components/MdEditor.vue'
+import SysPageHeader from '../../components/SysPageHeader.vue'
 
 const list = ref<HelpDocItem[]>([])
 const loading = ref(false)

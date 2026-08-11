@@ -81,6 +81,7 @@ type Firmware struct {
 	FileURL     string    `gorm:"size:255" json:"fileUrl"`
 	FileSize    int64     `json:"fileSize"`
 	Checksum    string    `gorm:"size:64" json:"checksum"`
+	CRC32       uint32    `gorm:"default:0" json:"crc32"`
 	Description string    `gorm:"size:512" json:"description"`
 	CreatedAt   time.Time `json:"createdAt"`
 }

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"hash/crc32"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -87,6 +88,7 @@ func CreateFirmware(c *gin.Context) {
 	var fileURL string
 	var fileSize int64
 	var checksum string
+	var crc32Val uint32
 
 	file, header, err := c.Request.FormFile("file")
 	if err == nil {
@@ -114,16 +116,18 @@ func CreateFirmware(c *gin.Context) {
 		key := fmt.Sprintf("firmware/%d_%s_%d_%x_%s",
 			productID, version, time.Now().Unix(), randBytes, safeName)
 
-		// 边传边算 SHA-256 checksum（与本地模式一致，设备下载后据此校验完整性）
-		hasher := sha256.New()
-		if err := storage.Default.Put(c.Request.Context(), key, io.TeeReader(file, hasher), header.Size); err != nil {
+		// 边传边算 SHA-256（完整性校验，已有）+ CRC32/IEEE（轻量快速校验，便于低算力设备先做粗校验）
+		sha := sha256.New()
+		crc := crc32.NewIEEE()
+		if err := storage.Default.Put(c.Request.Context(), key, io.TeeReader(file, io.MultiWriter(sha, crc)), header.Size); err != nil {
 			slog.Error("store firmware failed", "key", key, "err", err)
 			Fail(c, 500, "保存文件失败")
 			return
 		}
 		fileURL = storage.Default.URL(key)
 		fileSize = header.Size
-		checksum = hex.EncodeToString(hasher.Sum(nil))
+		checksum = hex.EncodeToString(sha.Sum(nil))
+		crc32Val = crc.Sum32()
 	}
 
 	fw := model.Firmware{
@@ -133,6 +137,7 @@ func CreateFirmware(c *gin.Context) {
 		FileURL:     fileURL,
 		FileSize:    fileSize,
 		Checksum:    checksum,
+		CRC32:       crc32Val,
 		Description: description,
 	}
 	if err := repository.DB.Create(&fw).Error; err != nil {
@@ -218,21 +223,24 @@ func CreateOTATask(c *gin.Context) {
 		"url":     fw.FileURL,
 		"size":    fw.FileSize,
 		"sha256":  fw.Checksum,
+		"crc32":   fw.CRC32,
 		"taskId":  task.ID,
 		"ts":      time.Now().UnixMilli(),
 	})
 
+	// 严格按设备接入协议选路：DownPublisher 内部已分流（TCP 设备走 gateway/Redis 扇出，MQTT 设备走 EMQX）。
+	// 不再做"DownPublisher 报错 → 回退 MQTT"的兜底——TCP/DTU 设备根本不订阅 MQTT 主题，回退只会把"离线"
+	// 伪装成"成功"，且对 MQTT 设备而言回退只是重复调用同一个已失败的 EMQX。失败（设备离线）如实计入。
 	successCount := 0
 	for _, d := range devices {
-		// 优先走统一下行通道（支持 TCP 在线设备），失败则直接 MQTT
-		if service.DownPublisher != nil {
-			if err := service.DownPublisher(d.ProductKey, d.Name, otaPayload); err == nil {
+		if service.DownPublisher == nil {
+			// 仅在 DownPublisher 未注入时（开发/测试）兜底走 MQTT
+			if err := mqtt.PublishDown(d.ProductKey, d.Name, otaPayload); err == nil {
 				successCount++
-				continue
 			}
+			continue
 		}
-		// fallback: 直接 MQTT
-		if err := mqtt.PublishDown(d.ProductKey, d.Name, otaPayload); err == nil {
+		if err := service.DownPublisher(d.ProductKey, d.Name, otaPayload); err == nil {
 			successCount++
 		}
 	}

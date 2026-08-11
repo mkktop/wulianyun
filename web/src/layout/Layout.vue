@@ -93,9 +93,11 @@
           当前为只读账号：仅可查看数据，无法执行新增、修改、删除、下发等操作
         </el-alert>
         <router-view v-slot="{ Component, route }">
-          <transition name="page-fade">
-            <component :is="Component" :key="route.path" />
-          </transition>
+          <div class="router-wrap">
+            <transition name="page-fade">
+              <component :is="Component" :key="route.path" />
+            </transition>
+          </div>
         </router-view>
       </el-main>
     </el-container>

@@ -1,0 +1,115 @@
+/**
+ * 系统管理页样式 —— 借鉴 Vue Vben Admin 商务风
+ * 渐变图标方块、精致阴影、统计卡片、统一页头。
+ * 仅 .system-page 作用域内生效（各 system 页面根元素加此 class）。
+ */
+.system-page {
+  /* 设计 token */
+  --sp-primary: #1890ff;
+  --sp-primary-grad: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+  --sp-success: #52c41a;
+  --sp-success-grad: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+  --sp-warning: #faad14;
+  --sp-warning-grad: linear-gradient(135deg, #faad14 0%, #d48806 100%);
+  --sp-error: #ff4d4f;
+  --sp-error-grad: linear-gradient(135deg, #ff4d4f 0%, #cf1322 100%);
+  --sp-purple: #722ed1;
+  --sp-purple-grad: linear-gradient(135deg, #722ed1 0%, #531dab 100%);
+  --sp-cyan: #13c2c2;
+  --sp-cyan-grad: linear-gradient(135deg, #13c2c2 0%, #08979c 100%);
+  --sp-text: #1f1f1f;
+  --sp-text-secondary: #8c8c8c;
+  --sp-radius: 10px;
+  --sp-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --sp-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+/* ---- 页头 ---- */
+.system-page .sp-header {
+  background: #fff; border-radius: var(--sp-radius); padding: 18px 24px;
+  margin-bottom: 16px; box-shadow: var(--sp-shadow);
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+}
+.system-page .sp-header-title { display: flex; align-items: center; gap: 10px; }
+.system-page .sp-header-title h2 { margin: 0; font-size: 18px; font-weight: 600; color: var(--sp-text); }
+.system-page .sp-header-title .el-icon { font-size: 22px; color: var(--sp-primary); }
+.system-page .sp-header-desc { color: var(--sp-text-secondary); font-size: 13px; margin-top: 4px; }
+
+/* ---- 通用内容卡片 ---- */
+.system-page .sp-card {
+  background: #fff; border-radius: var(--sp-radius); box-shadow: var(--sp-shadow);
+  margin-bottom: 16px; transition: box-shadow 0.3s, transform 0.3s;
+}
+.system-page .sp-card-header {
+  padding: 14px 20px; border-bottom: 1px solid #f0f0f0;
+  display: flex; justify-content: space-between; align-items: center;
+  font-weight: 600; color: var(--sp-text);
+}
+.system-page .sp-card-header .el-icon { color: var(--sp-primary); margin-right: 6px; vertical-align: middle; }
+.system-page .sp-card-body { padding: 20px; }
+
+/* ---- 健康状态卡片（顶部彩边 + 图标） ---- */
+.system-page .sp-health {
+  background: #fff; border-radius: var(--sp-radius); padding: 20px;
+  box-shadow: var(--sp-shadow); transition: all 0.3s;
+  border-top: 3px solid var(--sp-text-secondary);
+  display: flex; align-items: center; gap: 14px;
+}
+.system-page .sp-health:hover { transform: translateY(-3px); box-shadow: var(--sp-shadow-hover); }
+.system-page .sp-health.ok { border-top-color: var(--sp-success); }
+.system-page .sp-health.bad { border-top-color: var(--sp-error); }
+.system-page .sp-health-icon {
+  width: 48px; height: 48px; border-radius: 12px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff;
+}
+.system-page .sp-health.ok .sp-health-icon { background: var(--sp-success-grad); }
+.system-page .sp-health.bad .sp-health-icon { background: var(--sp-error-grad); }
+.system-page .sp-health-label { color: var(--sp-text-secondary); font-size: 13px; }
+.system-page .sp-health-value { font-size: 17px; font-weight: 600; color: var(--sp-text); margin-top: 2px; }
+.system-page .sp-health-error { color: var(--sp-error); font-size: 12px; margin-top: 4px; word-break: break-all; }
+
+/* ---- 统计卡片（渐变图标方块 + 数据） ---- */
+.system-page .sp-stat {
+  background: #fff; border-radius: var(--sp-radius); padding: 20px;
+  display: flex; align-items: center; gap: 16px;
+  box-shadow: var(--sp-shadow); transition: all 0.3s;
+}
+.system-page .sp-stat:hover { transform: translateY(-3px); box-shadow: var(--sp-shadow-hover); }
+.system-page .sp-stat-icon {
+  width: 56px; height: 56px; border-radius: 14px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 26px; color: #fff;
+}
+.system-page .sp-stat-icon.blue { background: var(--sp-primary-grad); }
+.system-page .sp-stat-icon.green { background: var(--sp-success-grad); }
+.system-page .sp-stat-icon.orange { background: var(--sp-warning-grad); }
+.system-page .sp-stat-icon.purple { background: var(--sp-purple-grad); }
+.system-page .sp-stat-icon.cyan { background: var(--sp-cyan-grad); }
+.system-page .sp-stat-icon.red { background: var(--sp-error-grad); }
+.system-page .sp-stat-value { font-size: 28px; font-weight: 700; color: var(--sp-text); line-height: 1.1; }
+.system-page .sp-stat-label { color: var(--sp-text-secondary); font-size: 13px; margin-top: 6px; }
+
+/* ---- 进程信息网格（替代 el-descriptions） ---- */
+.system-page .sp-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+  background: #f0f0f0; border-radius: 8px; overflow: hidden;
+}
+.system-page .sp-grid-item { background: #fff; padding: 16px 20px; }
+.system-page .sp-grid-label { color: var(--sp-text-secondary); font-size: 12px; margin-bottom: 6px; }
+.system-page .sp-grid-value { font-size: 16px; font-weight: 600; color: var(--sp-text); }
+
+/* ---- 表格美化（覆盖 EP 默认） ---- */
+.system-page .el-table { border-radius: 8px; overflow: hidden; }
+.system-page .el-table th.el-table__cell {
+  background: #fafafa !important; color: var(--sp-text); font-weight: 600;
+}
+.system-page .el-table tr:hover > td { background: #f0f7ff !important; }
+
+/* ---- 卡片标题/描述文字 ---- */
+.system-page .sp-section-title {
+  font-size: 15px; font-weight: 600; color: var(--sp-text);
+  margin: 8px 0 14px; display: flex; align-items: center; gap: 6px;
+}
+.system-page .sp-section-title::before {
+  content: ''; display: inline-block; width: 3px; height: 14px;
+  background: var(--sp-primary); border-radius: 2px;
+}

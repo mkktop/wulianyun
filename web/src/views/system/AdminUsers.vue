@@ -1,22 +1,26 @@
 <template>
-  <el-card shadow="never">
-    <div class="toolbar">
-      <div class="filters">
-        <el-input v-model="filters.keyword" placeholder="用户名 / 昵称" clearable style="width: 180px" @keyup.enter="load" />
-        <el-select v-model="filters.role" placeholder="角色" clearable style="width: 130px" @change="load">
-          <el-option label="超管" value="admin" />
-          <el-option label="普通用户" value="user" />
-        </el-select>
-        <el-select v-model="filters.status" placeholder="状态" clearable style="width: 130px" @change="load">
-          <el-option label="启用" value="active" />
-          <el-option label="禁用" value="disabled" />
-        </el-select>
-        <el-button type="primary" @click="load">查询</el-button>
-      </div>
+  <div class="system-page">
+    <SysPageHeader title="用户管理" desc="全量用户（超管 / 一级 / 二级），可创建、改角色、重置密码" icon="UserFilled">
       <el-button type="primary" @click="openCreate">
         <el-icon><Plus /></el-icon>&nbsp;新建用户
       </el-button>
-    </div>
+    </SysPageHeader>
+
+    <div class="sp-card">
+      <div class="sp-card-body">
+        <div class="filters" style="margin-bottom: 16px">
+          <el-input v-model="filters.keyword" placeholder="用户名 / 昵称" clearable style="width: 180px" @keyup.enter="load" />
+          <el-select v-model="filters.role" placeholder="角色" clearable style="width: 130px" @change="load">
+            <el-option label="超管" value="admin" />
+            <el-option label="普通用户" value="user" />
+          </el-select>
+          <el-select v-model="filters.status" placeholder="状态" clearable style="width: 130px" @change="load">
+            <el-option label="启用" value="active" />
+            <el-option label="禁用" value="disabled" />
+          </el-select>
+          <el-button type="primary" @click="load">查询</el-button>
+        </div>
+
 
     <el-table :data="list" v-loading="loading" stripe>
       <el-table-column prop="username" label="用户名" min-width="130" />
@@ -75,6 +79,8 @@
         @current-change="load"
       />
     </div>
+      </div>
+    </div>
 
     <!-- 新建用户 -->
     <el-dialog v-model="createVisible" title="新建用户" width="460px" :close-on-click-modal="false">
@@ -130,7 +136,7 @@
         <el-button type="primary" :loading="editSaving" @click="doEdit">保存</el-button>
       </template>
     </el-dialog>
-  </el-card>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -138,6 +144,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { api, type AdminUser } from '../../api'
 import { fmtDate } from '../../utils/format'
+import SysPageHeader from '../../components/SysPageHeader.vue'
 
 const myId = Number(localStorage.getItem('userId') || 0)
 const list = ref<AdminUser[]>([])
