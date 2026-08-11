@@ -32,3 +32,6 @@ deploy/dist/kk-iot-*/
 # 构建/部署产物
 _kk/
 .build/
+
+# ZCode 本地会话计划/记忆
+.zcode/
