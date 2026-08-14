@@ -204,9 +204,17 @@ func ResolveAlarm(c *gin.Context) {
 		return
 	}
 	now := time.Now()
-	repository.DB.Model(&a).Updates(map[string]interface{}{
-		"status": model.AlarmStatusResolved, "resolved_at": now,
-	})
+	// 同 (规则,设备) 的 firing 告警一并恢复：firing TTL 过期可能产生并存的多条 firing 行
+	repository.DB.Model(&model.Alarm{}).
+		Where("rule_id = ? AND device_id = ? AND status = ?", a.RuleID, a.DeviceID, model.AlarmStatusFiring).
+		Updates(map[string]interface{}{
+			"status":      model.AlarmStatusResolved,
+			"resolved_at": now,
+		})
+	// 清除 firing 去重门：否则条件持续为真时告警在标记存活期内不会再触发
+	if a.RuleID > 0 {
+		rule.ClearFiringState(a.RuleID, a.DeviceID)
+	}
 	OK(c, nil)
 }
 

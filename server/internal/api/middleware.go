@@ -47,11 +47,12 @@ func ParseToken(tokenStr string) (*Claims, error) {
 	return nil, jwt.ErrTokenInvalidClaims
 }
 
-// JWTAuth 认证中间件；WebSocket 场景支持 query 传 token
+// JWTAuth 认证中间件；WebSocket 升级场景（浏览器无法自定义 Authorization 头）支持 query 传 token
 func JWTAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenStr := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
-		if tokenStr == "" {
+		if tokenStr == "" && strings.HasSuffix(c.Request.URL.Path, "/ws") {
+			// 仅限 WS 端点：token 进 query 会泄露进访问日志（logger 对 WS 路径已跳过记录）
 			tokenStr = c.Query("token")
 		}
 		if tokenStr == "" {

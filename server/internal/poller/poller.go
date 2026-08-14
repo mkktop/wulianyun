@@ -219,13 +219,27 @@ func runGroup(p *model.Product, deviceName string, g groupPlan, cancel chan stru
 	}
 }
 
+// releaseLockScript 安全释放锁：仅当锁值仍是自己的 token 时才删除，
+// 防止"TTL 到期 → 他实例抢到新锁 → 旧持有者 Del 误删他人锁"的连锁并发采集
+var releaseLockScript = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+	return redis.call("DEL", KEYS[1])
+else
+	return 0
+end
+`)
+
 // pollGroup 采集一个组：合并连续寄存器批量读取 → 变更过滤 → 上报
 func pollGroup(p *model.Product, deviceName string, g groupPlan) {
-	// 多实例分布式锁：获取锁才执行采集，防止多实例重复轮询同一设备组
+	// 多实例分布式锁：获取锁才执行采集，防止多实例重复轮询同一设备组。
+	// 锁值带随机 token（安全释放）；TTL 按单次请求超时上浮——慢从机 + 多块请求
+	// 时单轮采集可能远超固定 60s，锁中途过期会让另一实例并发接入
 	lockKey := fmt.Sprintf("poller:lock:%d_%d_%s", p.ID, g.id, deviceName)
 	if rdb != nil {
 		ctx := context.Background()
-		ok, err := rdb.SetNX(ctx, lockKey, "1", 60*time.Second).Result()
+		token := fmt.Sprintf("%x", rand.Uint64())
+		lockTTL := requestTimeoutOf(p)*8 + 30*time.Second
+		ok, err := rdb.SetNX(ctx, lockKey, token, lockTTL).Result()
 		if err != nil {
 			// Redis 抖动/不可用：告警并降级为单实例轮询。
 			// 直接 return 会导致该设备组所有采集停止（违反"Redis 不可用降级"约定）
@@ -233,7 +247,7 @@ func pollGroup(p *model.Product, deviceName string, g groupPlan) {
 		} else if !ok {
 			return // 其他实例正在采集，跳过
 		} else {
-			defer rdb.Del(ctx, lockKey)
+			defer releaseLockScript.Run(ctx, rdb, []string{lockKey}, token)
 		}
 	}
 
@@ -324,8 +338,8 @@ func WriteProperty(productKey, deviceName string, payload []byte) error {
 		return fmt.Errorf("无可写参数")
 	}
 
-	var p model.Product
-	if err := repository.DB.Where("product_key = ?", productKey).First(&p).Error; err != nil {
+	p, err := service.FindProductByKey(productKey)
+	if err != nil {
 		return err
 	}
 	var points []model.ModbusPoint
@@ -355,7 +369,7 @@ func WriteProperty(productKey, deviceName string, payload []byte) error {
 			continue
 		}
 		// 写操作也等待应答（回显帧），失败不阻塞其他点位
-		if _, err := gateway.Request(productKey, deviceName, frame, requestTimeoutOf(&p)); err != nil {
+		if _, err := gateway.Request(productKey, deviceName, frame, requestTimeoutOf(p)); err != nil {
 			lastErr = err
 			continue
 		}

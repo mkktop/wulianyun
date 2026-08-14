@@ -48,6 +48,7 @@ func Start() {
 		SetOnConnectHandler(func(c paho.Client) {
 			slog.Info("mqtt connected", "broker", config.C.MQTT.Broker)
 			subscribe(c)
+			SubscribeReply() // 重连时重订 reply 主题（会话被 broker 清理时兜底）
 		}).
 		SetConnectionLostHandler(func(c paho.Client, err error) {
 			slog.Warn("mqtt connection lost", "err", err)
@@ -75,6 +76,10 @@ func Start() {
 	}
 }
 
+// maxTelemetryPayload MQTT 上行 payload 上限（与 codec/HTTP 入口对齐）：
+// paho 不限制消息大小，超大 payload 的 JSON 解析会内存放大
+const maxTelemetryPayload = 256 << 10
+
 func subscribe(c paho.Client) {
 	// 设备遥测上行
 	c.Subscribe(TopicUpPrefix+"#", QoS1, func(_ paho.Client, m paho.Message) {
@@ -89,14 +94,24 @@ func subscribe(c paho.Client) {
 		}
 		// OTA 进度上报：thing/up/{pk}/{dn}/ota
 		if len(parts) >= 5 && parts[4] == "ota" {
-			var d model.Device
-			if err := repository.DB.Where("product_key = ? AND name = ?", parts[2], parts[3]).First(&d).Error; err != nil {
-				return
-			}
-			go service.HandleOTAProgress(d.ID, m.Payload())
+			// 设备查询移出 paho 分发协程：万级设备升级风暴时，
+			// 同步查库会串行阻塞整个 thing/up/# 的消息分发（含全部遥测）
+			pk, dn := parts[2], parts[3]
+			go func() {
+				var d model.Device
+				if err := repository.DB.Where("product_key = ? AND name = ?", pk, dn).First(&d).Error; err != nil {
+					return
+				}
+				service.HandleOTAProgress(d.ID, m.Payload())
+			}()
 			return
 		}
-		go service.HandleTelemetry(parts[2], parts[3], m.Payload())
+		if len(m.Payload()) > maxTelemetryPayload {
+			slog.Warn("mqtt telemetry payload too large, dropped", "topic", m.Topic(), "size", len(m.Payload()))
+			return
+		}
+		// 有界 worker 池（按设备哈希分片保序），替代无界 go，防 DB 抖动时协程堆积
+		service.SubmitTelemetry(parts[2], parts[3], m.Payload())
 	})
 
 	// 设备遗嘱消息（LWT）：thing/offline/{pk}/{dn}
@@ -139,7 +154,13 @@ func handleSysEvent(payload []byte, online bool) {
 	if evt.ClientID == config.C.MQTT.ClientID {
 		return
 	}
-	service.QueueStatus(evt.ClientID, online, evt.Ts)
+	// 时间戳单位兼容：部分 EMQX 版本/事件的 ts 为秒级。统一归一为毫秒——
+	// 若把秒当毫秒，last_online/offline 会被写成 1970 年，离线告警判定整体失效
+	ts := evt.Ts
+	if ts > 0 && ts < 1e11 {
+		ts *= 1000
+	}
+	service.QueueStatus(evt.ClientID, online, ts)
 }
 
 // Disconnect 主动断开 broker 连接（优雅关闭时停止接收设备上行）
@@ -212,6 +233,9 @@ func ClearRetained(productKey, deviceName string) error {
 	}
 	topic := TopicDownPrefix + productKey + "/" + deviceName + "/retained"
 	token := client.Publish(topic, QoS1, true, []byte(""))
+	if !token.WaitTimeout(5 * time.Second) {
+		return fmt.Errorf("发布超时")
+	}
 	return token.Error()
 }
 
@@ -220,7 +244,9 @@ func Client() paho.Client {
 	return client
 }
 
-// SubscribeReply 订阅设备指令应答主题
+// SubscribeReply 订阅设备指令应答主题。
+// 在 subscribe（重连即重订）中一并调用：持久会话被 broker 清理（EMQX 重启/迁移）时，
+// 仅在进程启动时订阅一次会丢失 reply 订阅，指令应答将永远无人处理
 func SubscribeReply() {
 	if client == nil || !client.IsConnected() {
 		return

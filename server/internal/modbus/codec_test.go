@@ -124,3 +124,17 @@ func TestBuildWriteSingleCoil(t *testing.T) {
 		t.Fatalf("写线圈帧错误: %X", frame)
 	}
 }
+
+// TestParseResponse_ForgedByteCount 伪造字节数防御：应答帧声明 250 字节但实际只有 5 字节，
+// 解析必须返回错误而不是切片越界 panic（byteCount 来自远端字节，不可信）
+func TestParseResponse_ForgedByteCount(t *testing.T) {
+	p := &model.ModbusPoint{SlaveID: 1, FunctionCode: model.FuncReadHoldingRegisters, RawType: "uint16"}
+	// 构造 CRC 合法但 byteCount=250 的短帧
+	body := []byte{0x01, 0x03, 0xFA, 0x00}
+	crc := CRC16(body)
+	frame := append(body, byte(crc&0xFF), byte(crc>>8))
+	_, err := ParseResponse(p, frame)
+	if err == nil {
+		t.Fatal("伪造 byteCount 应返回错误")
+	}
+}

@@ -40,8 +40,16 @@ func uploadsDownload() gin.HandlerFunc {
 }
 
 func NewRouter() *gin.Engine {
+	// 生产默认 release 模式（不打路由表调试信息）；需要调试时设 GIN_MODE=debug
+	if os.Getenv("GIN_MODE") == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	// 仅信任内网反代的 X-Forwarded-For（部署拓扑里 nginx 在 docker 内网），
+	// 防止公网客户端伪造 XFF 绕过按 IP 的限流；直连场景无 XFF，取 RemoteAddr
+	_ = r.SetTrustedProxies([]string{"127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"})
+	// WS 经 query 传 token（浏览器无法自定义升级请求头），跳过访问日志防 token 泄露进日志
+	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipPaths: []string{"/api/v1/mqtt-debug/ws"}}), gin.Recovery())
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:5173", "http://127.0.0.1:5173"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -59,13 +67,13 @@ func NewRouter() *gin.Engine {
 		v1.GET("/healthz", Healthz)
 		v1.GET("/readyz", Readyz)
 
-		// 公开接口
-		v1.POST("/auth/register", Register)
-		v1.POST("/auth/login", Login)
-		v1.POST("/auth/token", DeviceToken) // 设备动态获取 MQTT Token
-		v1.POST("/emqx/auth", EmqxAuth) // EMQX 认证回调（内网）
-		v1.POST("/emqx/acl", EmqxACL)   // EMQX 授权回调（内网）
-		v1.POST("/http/telemetry", HTTPDeviceTelemetry) // 设备HTTP上报（Token认证）
+		// 公开接口（登录/换token/注册按 IP 限流，防暴破与批量注册）
+		v1.POST("/auth/register", ipRateLimit(20, time.Minute), Register)
+		v1.POST("/auth/login", ipRateLimit(20, time.Minute), Login)
+		v1.POST("/auth/token", ipRateLimit(60, time.Minute), DeviceToken) // 设备动态获取 MQTT Token
+		v1.POST("/emqx/auth", ipRateLimit(600, time.Minute), EmqxAuth) // EMQX 认证回调（内网）
+		v1.POST("/emqx/acl", ipRateLimit(1200, time.Minute), EmqxACL)   // EMQX 授权回调（内网）
+		v1.POST("/http/telemetry", ipRateLimit(600, time.Minute), HTTPDeviceTelemetry) // 设备HTTP上报（Token认证）
 
 		// WebSocket 实时推送：公开升级，首帧 {type:"auth",token} 认证（token 不进 URL）
 		v1.GET("/ws", WSHandler)

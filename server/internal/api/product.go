@@ -8,6 +8,7 @@ import (
 
 	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
+	"iot-platform/internal/service"
 )
 
 func randHex(n int) string {
@@ -98,6 +99,11 @@ func CreateProduct(c *gin.Context) {
 	} else if req.Protocol == "" {
 		req.Protocol = "mqtt"
 	}
+	// TCP 组帧配置校验：负偏移会让网关组帧负索引切片 panic（远程 DoS），必须在入口拒绝
+	if msg := validateFrameConfig(req.FrameMode, req.FrameLenOffset, req.FrameLenSize); msg != "" {
+		Fail(c, 400, msg)
+		return
+	}
 	p := model.Product{
 		UserID: UID(c), Name: req.Name, ProductKey: genProductKey(),
 		Protocol: req.Protocol, DataFormat: req.DataFormat, Description: req.Description,
@@ -152,9 +158,27 @@ func ListProducts(c *gin.Context) {
 		Fail(c, 500, "查询失败")
 		return
 	}
-	for i := range list {
-		repository.DB.Model(&model.Device{}).Where("product_id = ?", list[i].ID).Count(&list[i].DeviceCount)
+	// 批量统计每产品设备数（一条 GROUP BY，替代逐产品 Count 的 N+1）
+	if len(list) > 0 {
+		ids := make([]uint, len(list))
+		for i := range list {
+			ids[i] = list[i].ID
+		}
+		var rows []struct {
+			ProductID uint
+			Cnt       int64
+		}
+		repository.DB.Model(&model.Device{}).Select("product_id, count(*) as cnt").
+			Where("product_id IN ?", ids).Group("product_id").Scan(&rows)
+		m := make(map[uint]int64, len(rows))
+		for _, r := range rows {
+			m[r.ProductID] = r.Cnt
+		}
+		for i := range list {
+			list[i].DeviceCount = m[list[i].ID]
+		}
 	}
+	maskProductSecrets(c, list)
 	OK(c, PageData{Total: total, List: list})
 }
 
@@ -174,7 +198,25 @@ func GetProduct(c *gin.Context) {
 		return
 	}
 	repository.DB.Model(&model.Device{}).Where("product_id = ?", p.ID).Count(&p.DeviceCount)
+	// 产品密钥打码：一型一密的 ProductSecret 可冒充该产品任意设备（动态注册/伪造上报），
+	// 仅产品所有者与平台超管可见；二级账号对被下放产品只读，不应取得密钥
+	if !IsAdmin(c) && p.UserID != UID(c) {
+		p.ProductSecret = ""
+	}
 	OK(c, p)
+}
+
+// maskProductSecrets 产品列表密钥打码（规则同详情：非所有者隐藏 ProductSecret）
+func maskProductSecrets(c *gin.Context, list []model.Product) {
+	if IsAdmin(c) {
+		return
+	}
+	uid := UID(c)
+	for i := range list {
+		if list[i].UserID != uid {
+			list[i].ProductSecret = ""
+		}
+	}
 }
 
 func UpdateProduct(c *gin.Context) {
@@ -217,6 +259,10 @@ func UpdateProduct(c *gin.Context) {
 	}
 	// 非 Modbus 的 TCP 产品：允许调整组帧/心跳配置
 	if p.Protocol == "tcp" && p.AccessMode != model.AccessModeModbus {
+		if msg := validateFrameConfig(req.FrameMode, req.FrameLenOffset, req.FrameLenSize); msg != "" {
+			Fail(c, 400, msg)
+			return
+		}
 		if req.FrameMode != "" {
 			updates["frame_mode"] = req.FrameMode
 		}
@@ -228,7 +274,22 @@ func UpdateProduct(c *gin.Context) {
 		updates["heartbeat_reply"] = req.HeartbeatReply
 	}
 	repository.DB.Model(&p).Updates(updates)
+	service.InvalidateProductCache(p.ProductKey)
 	OK(c, p)
+}
+
+// validateFrameConfig TCP 长度字段组帧配置校验
+func validateFrameConfig(frameMode string, lenOffset, lenSize int) string {
+	if frameMode != model.FrameModeLength {
+		return ""
+	}
+	if lenOffset < 0 || lenOffset > 1024 {
+		return "长度字段偏移必须为 0~1024"
+	}
+	if lenSize != 1 && lenSize != 2 {
+		return "长度字段字节数仅支持 1 或 2"
+	}
+	return ""
 }
 
 func DeleteProduct(c *gin.Context) {
@@ -245,6 +306,7 @@ func DeleteProduct(c *gin.Context) {
 	}
 	repository.DB.Where("product_id = ?", p.ID).Delete(&model.ProductGrant{}) // 清理下放授权
 	repository.DB.Delete(&p)
+	service.InvalidateProductCache(p.ProductKey)
 	OK(c, nil)
 }
 

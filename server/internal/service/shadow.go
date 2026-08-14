@@ -19,7 +19,7 @@ var DownRetainedPublisher func(productKey, deviceName string, payload []byte) er
 // GetShadow 获取设备影子（无则初始化）。返回深拷贝，避免调用方并发 marshal 缓存活指针产生 data race（#30）
 func GetShadow(deviceID uint) *model.DeviceShadow {
 	if s := CachedGetShadow(deviceID); s != nil {
-		return cloneShadow(s)
+		return s // CachedGetShadow 已在锁内深拷贝
 	}
 	// 缓存未命中，从 DB 加载并初始化
 	var s model.DeviceShadow
@@ -103,7 +103,7 @@ func UpdateShadowDesired(d *model.Device, desired map[string]interface{}) (*mode
 			pushDesired(d, delta)
 		}
 	}
-	return s, nil
+	return cloneShadow(s), nil // 拷贝后返回，避免调用方 marshal 与并发写竞争
 }
 
 // computeDelta 计算 old vs new 的差异，仅返回变化或新增的项

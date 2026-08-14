@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 
@@ -147,11 +149,17 @@ func Overview(c *gin.Context) {
 		Where("telemetries.ts >= ?", oneHourAgo).Count(&msgLastHour)
 	msgRateMin := msgLastHour / 60 // 每分钟平均
 
-	// 总消息量
+	// 总消息量：hypertable 全量 COUNT 在大数据量下是分钟级重查询，
+	// 加 8s 超时防止一个概览页请求长时间占用连接池；超时/失败返回 0 而非整体 500
+	msgTotalCtx, cancelMsgTotal := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancelMsgTotal()
 	var msgTotal int64
-	repository.DB.Model(&model.Telemetry{}).
+	if err := repository.DB.WithContext(msgTotalCtx).Model(&model.Telemetry{}).
 		Joins("JOIN devices ON devices.id = telemetries.device_id").
-		Scopes(ownedScope(c, "devices.user_id")).Count(&msgTotal)
+		Scopes(ownedScope(c, "devices.user_id")).Count(&msgTotal).Error; err != nil {
+		slog.Warn("overview msg total count failed (large table?)", "err", err)
+		msgTotal = 0
+	}
 
 	OK(c, gin.H{
 		"productCount": productCount,

@@ -1,3 +1,7 @@
+# 多实例水平部署时置 true（影子缓存改走 DB 读改写保证跨实例一致）
+# 单实例（默认 false）时影子走本地内存缓存 + 定期刷盘
+multi_instance: false
+
 server:
   addr: ":8080"
 
@@ -40,6 +44,10 @@ mqtt:
   # 平台内部账号，EMQX 鉴权回调中放行
   username: "iot-platform-internal"
   password: "internal-secret-2026"
+  # EMQX 认证/授权回调共享密钥：配置后回调必须携带同值 X-Callback-Secret 头
+  # （EMQX 认证器 headers 中配置同一密钥），防止回调端点被第三方直接调用暴破口令。
+  # 留空跳过校验（兼容存量部署）；生产建议配置随机值
+  callback_secret: ""
   tls:
     enabled: false
     ca_cert: ""
@@ -50,6 +58,8 @@ mqtt:
 telemetry_buffer:
   max_batch: 100
   flush_interval: 1
+  # 遥测处理 worker 数（按设备哈希分片保序；0 = 默认 64）
+  workers: 64
 
 cache:
   device_ttl: 300

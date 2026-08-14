@@ -89,10 +89,11 @@ func ParseResponse(p *model.ModbusPoint, frame []byte) (float64, error) {
 		return 0, fmt.Errorf("功能码不匹配: 期望 %d 收到 %d", p.FunctionCode, frame[1])
 	}
 	byteCount := int(frame[2])
-	data := frame[3 : 3+byteCount]
-	if len(data) < byteCount {
-		return 0, fmt.Errorf("数据长度不足")
+	// 先校验总长再切片：byteCount 来自远端字节，伪造大值会让切片越界 panic
+	if len(frame) < 3+byteCount+2 {
+		return 0, fmt.Errorf("数据长度不足: 声明 %d 字节, 实际 %d 字节", byteCount, len(frame)-5)
 	}
+	data := frame[3 : 3+byteCount]
 
 	// 线圈/离散量：按位取
 	if p.IsCoilFunc() {

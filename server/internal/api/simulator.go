@@ -123,7 +123,7 @@ func PublishSimulator(c *gin.Context) {
 		return
 	}
 	payload, _ := json.Marshal(req.Payload)
-	go service.HandleTelemetry(sess.ProductKey, sess.DeviceName, payload)
+	service.SubmitTelemetry(sess.ProductKey, sess.DeviceName, payload)
 	OK(c, gin.H{"status": "sent"})
 }
 
@@ -135,23 +135,21 @@ func DisconnectSimulator(c *gin.Context) {
 		Fail(c, 1, err.Error())
 		return
 	}
+	// 会话归属校验先行：此前"先删后校验"让可猜测的 sessionID（纳秒时间戳）
+	// 能断开他人会话（校验形同虚设）
 	simMu.Lock()
 	sess, ok := simSessions[req.SessionID]
-	if ok {
-		sess.Status = "disconnected"
-		delete(simSessions, req.SessionID)
-	}
-	simMu.Unlock()
-	// 会话归属校验：只能断开自己创建的模拟会话
-	if ok && sess.UserID != UID(c) {
+	if !ok || sess.UserID != UID(c) {
+		simMu.Unlock()
 		Fail(c, 1, "session not found")
 		return
 	}
-	if ok {
-		// clientID 须为纯拼接（见 StartSimulator 同名注释）
-		clientID := sess.ProductKey + sess.DeviceName
-		service.QueueStatus(clientID, false, 0)
-	}
+	sess.Status = "disconnected"
+	delete(simSessions, req.SessionID)
+	simMu.Unlock()
+	// clientID 须为纯拼接（见 StartSimulator 同名注释）
+	clientID := sess.ProductKey + sess.DeviceName
+	service.QueueStatus(clientID, false, 0)
 	OK(c, nil)
 }
 

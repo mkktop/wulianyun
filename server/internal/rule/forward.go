@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"sync"
 	"time"
 
@@ -77,6 +79,45 @@ func ForwardToMqttBridge(broker, topic, username, password string, payload []byt
 	}
 }
 
+// validateBrokerURL MQTT 桥接目标 SSRF 校验（与 webhook 同级防护）：
+// 仅允许 tcp/ssl(mqtt/mqtts) scheme，拒绝 localhost/私网/回环/链路本地等内网地址——
+// 否则任意租户可用转发规则让服务器向内网任意端口发起连接并发布数据（内网探测/数据外送）
+func validateBrokerURL(broker string) error {
+	u, err := url.Parse(broker)
+	if err != nil {
+		return err
+	}
+	switch u.Scheme {
+	case "tcp", "ssl", "mqtt", "mqtts":
+	default:
+		return fmt.Errorf("仅支持 tcp:// 或 ssl:// 目标")
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("目标主机为空")
+	}
+	if host == "localhost" {
+		return fmt.Errorf("目标地址不允许")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if isBlockedIP(ip) {
+			return fmt.Errorf("目标地址不允许")
+		}
+		return nil
+	}
+	// 域名：解析后校验全部 IP（连接由 paho 发起，无法在拨号层拦截，此处尽力覆盖）
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return err
+	}
+	for _, ip := range ips {
+		if isBlockedIP(ip) {
+			return fmt.Errorf("目标地址不允许")
+		}
+	}
+	return nil
+}
+
 // getBridgeClient 复用 broker 连接；锁内只读写 map，阻塞 Connect 移到锁外（per-broker singleflight）
 func getBridgeClient(broker, username, password string) mqtt.Client {
 	// 快路径：锁内查 map，命中且连接健康直接返回
@@ -95,6 +136,16 @@ func getBridgeClient(broker, username, password string) mqtt.Client {
 	bridgePending[broker] = p
 	bridgeMu.Unlock()
 
+	// SSRF 校验（域名解析在每次建连时做）
+	if err := validateBrokerURL(broker); err != nil {
+		slog.Warn("mqtt bridge broker rejected", "broker", broker, "err", err)
+		bridgeMu.Lock()
+		delete(bridgePending, broker)
+		bridgeMu.Unlock()
+		close(p.done)
+		return nil
+	}
+
 	// 锁外阻塞连接（一个不可达 broker 最多阻塞一次 Connect，不拖慢其他 broker/租户）
 	opts := mqtt.NewClientOptions().
 		AddBroker(broker).
@@ -109,7 +160,13 @@ func getBridgeClient(broker, username, password string) mqtt.Client {
 	token := c.Connect()
 	ok := token.WaitTimeout(5*time.Second) && token.Error() == nil
 	if !ok {
-		slog.Error("mqtt bridge connect failed", "broker", broker, "error", token.Error())
+		err := token.Error()
+		if err == nil {
+			err = fmt.Errorf("connect timeout")
+		}
+		slog.Error("mqtt bridge connect failed", "broker", broker, "error", err)
+		// 显式断开：清掉 paho 可能残留的自动重连协程与 socket（不可达 broker 每 5s 重试一次永不退出）
+		c.Disconnect(0)
 		c = nil
 	}
 
@@ -124,7 +181,9 @@ func getBridgeClient(broker, username, password string) mqtt.Client {
 	delete(bridgePending, broker)
 	bridgeMu.Unlock()
 
-	close(p.done)
+	// 先写结果再关闭 done：等待方从 <-p.done 醒来后即读 p.c，
+	// 若先 close 后赋值会构成竞态（等待方可能读到零值 nil）
 	p.c, p.ok = c, ok
+	close(p.done)
 	return c
 }

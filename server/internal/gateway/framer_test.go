@@ -119,3 +119,23 @@ func crc16(data []byte) uint16 {
 	}
 	return crc
 }
+
+// TestFramerNegativeLenOffset 负长度偏移防御：API 层拒绝 + newFramer 钳制双保险，
+// 确保恶意/错误配置不会让组帧负索引 panic（会杀死整个进程）
+func TestFramerNegativeLenOffset(t *testing.T) {
+	p := &model.Product{
+		AccessMode: model.AccessModePassthrough,
+		FrameMode:  model.FrameModeLength,
+		FrameLenOffset: -1, // 非法负偏移
+		FrameLenSize:   1,
+	}
+	f := newFramer(p)
+	if f.lenOffset < 0 {
+		t.Fatalf("负偏移未被钳制: %d", f.lenOffset)
+	}
+	// 钳制后组帧不 panic 且行为正常（按 offset=0 解析：首字节 0x02 为长度值，帧总长 2）
+	frames := collect(f, []byte{0x02, 'a', 'b'})
+	if len(frames) != 1 || string(frames[0]) != "\x02a" {
+		t.Fatalf("钳制后组帧异常: %q", frames)
+	}
+}

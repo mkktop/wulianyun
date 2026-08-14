@@ -221,12 +221,13 @@ func (c *Client) writeLoop() {
 	}
 }
 
-// wsBroadcastMsg 跨实例广播消息（包含目标用户和完整 OutMsg）
+// wsBroadcastMsg 跨实例广播消息（包含目标用户和完整 OutMsg）。
+// Msg 用 RawMessage 承载已序列化的消息体——发送方只 marshal 一次，接收方直接透传
 type wsBroadcastMsg struct {
-	InstanceID string `json:"instanceId"` // 发送方实例；接收方跳过自身回声
-	UserID     uint   `json:"userId"`
-	OnlyDevice *uint  `json:"onlyDevice,omitempty"`
-	Msg        OutMsg `json:"msg"`
+	InstanceID string          `json:"instanceId"` // 发送方实例；接收方跳过自身回声
+	UserID     uint            `json:"userId"`
+	OnlyDevice *uint           `json:"onlyDevice,omitempty"`
+	Msg        json.RawMessage `json:"msg"`
 }
 
 // PushTelemetry 推送遥测给订阅了该设备的连接
@@ -249,14 +250,24 @@ func (h *Hub) PushEvent(userID uint, payload interface{}) {
 	h.push(userID, nil, OutMsg{Type: "event", Payload: payload})
 }
 
-// push 本地推送 + 跨实例广播
+// push 本地推送 + 跨实例广播。
+// 单实例模式（无 Redis PubSub）且本实例无该用户连接时直接返回——
+// 遥测高峰下每条消息 × 每个接收人的序列化全是白费；多实例仍需广播（其他实例可能持有连接）
 func (h *Hub) push(userID uint, onlyDevice *uint, msg OutMsg) {
+	if RedisPubSub == nil {
+		h.mu.RLock()
+		_, has := h.clients[userID]
+		h.mu.RUnlock()
+		if !has {
+			return
+		}
+	}
 	data, _ := json.Marshal(msg)
 	// 1. 本实例直接推送
 	h.localPush(userID, onlyDevice, data)
 	// 2. 通过 Redis Pub/Sub 广播给其他实例（带实例 ID，接收端跳过自身回声）
 	if RedisPubSub != nil {
-		bm := wsBroadcastMsg{InstanceID: instanceID, UserID: userID, OnlyDevice: onlyDevice, Msg: msg}
+		bm := wsBroadcastMsg{InstanceID: instanceID, UserID: userID, OnlyDevice: onlyDevice, Msg: data}
 		bmData, _ := json.Marshal(bm)
 		_ = RedisPubSub.Publish(context.Background(), wsChannel, bmData)
 	}
@@ -293,6 +304,5 @@ func (h *Hub) localDispatch(bmData []byte) {
 	if bm.InstanceID == instanceID {
 		return // 自己发出的广播回环：本地已直推过，跳过避免重复
 	}
-	data, _ := json.Marshal(bm.Msg)
-	h.localPush(bm.UserID, bm.OnlyDevice, data)
+	h.localPush(bm.UserID, bm.OnlyDevice, bm.Msg) // RawMessage 已是序列化结果，直接透传
 }

@@ -8,7 +8,10 @@ import (
 )
 
 type Config struct {
-	Server struct {
+	// MultiInstance 是否多实例水平部署。影响单/多实例行为选择：
+	// true 时影子走 DB 读改写（本地缓存跨实例会陈旧）；false（默认）时影子享本地缓存
+	MultiInstance bool `yaml:"multi_instance"`
+	Server        struct {
 		Addr string `yaml:"addr"`
 	} `yaml:"server"`
 	Gateway struct {
@@ -50,7 +53,11 @@ type Config struct {
 		ClientID string `yaml:"client_id"`
 		Username string `yaml:"username"`
 		Password string `yaml:"password"`
-		TLS      struct {
+		// CallbackSecret EMQX 认证/授权回调的共享密钥：配置后 EMQX 回调必须携带
+		// 同值的 X-Callback-Secret 头，防止回调端点被第三方直接调用充当口令暴破 oracle。
+		// 需在 EMQX 认证器（HTTP Auth）的 headers 中配置同一密钥；留空则跳过校验（兼容存量）
+		CallbackSecret string `yaml:"callback_secret"`
+		TLS            struct {
 			Enabled            bool   `yaml:"enabled"`
 			CACert             string `yaml:"ca_cert"`
 			ClientCert         string `yaml:"client_cert"`
@@ -61,6 +68,8 @@ type Config struct {
 	TelemetryBuffer struct {
 		MaxBatch      int `yaml:"max_batch"`
 		FlushInterval int `yaml:"flush_interval"` // 秒
+		// Workers 遥测处理 worker 数（按设备哈希分片保序）；0 用默认 64
+		Workers int `yaml:"workers"`
 	} `yaml:"telemetry_buffer"`
 	Cache struct {
 		DeviceTTL           int `yaml:"device_ttl"`            // 秒
@@ -99,9 +108,15 @@ func Load(path string) error {
 	if err := yaml.Unmarshal(data, &C); err != nil {
 		return err
 	}
-	// 安全提醒：JWT 密钥过弱时告警——默认占位符是仓库公开值，可用它伪造 admin 令牌
+	// 密钥支持环境变量注入（多实例共享同一密钥 / 容器化部署密钥不入配置文件）
+	if v := os.Getenv("IOT_JWT_SECRET"); v != "" {
+		C.JWT.Secret = v
+	}
+	// 安全提醒：JWT 密钥为空或为仓库公开的默认占位符时，任何拿到该字符串的人
+	// 都能伪造 admin 令牌接管平台——生产环境务必配置随机强密钥（≥32 字节）
 	if C.JWT.Secret == "" || len(C.JWT.Secret) < 16 || C.JWT.Secret == "iot-platform-jwt-secret-change-me" {
-		slog.Warn("JWT secret 为空或为默认占位符，可被伪造 admin 令牌；生产环境务必配置随机强密钥")
+		slog.Error("⚠ JWT secret 为空或为默认占位符（iot-platform-jwt-secret-change-me），"+
+			"可被伪造 admin 令牌接管平台！生产环境必须改为随机强密钥（支持环境变量 IOT_JWT_SECRET 注入）")
 	}
 	return nil
 }

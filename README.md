@@ -417,6 +417,7 @@ function encode(obj) {
 
 | 键 | 默认值 | 单位 | 说明 |
 |---|---|---|---|
+| `multi_instance` | `false` | - | 是否多实例水平部署（true 时影子改走 DB 读改写保证跨实例一致） |
 | `server.addr` | `:8080` | - | HTTP 服务监听地址 |
 | `gateway.addr` | `:9100` | - | TCP 透传网关监听地址 |
 | `gateway.idle_timeout` | `300` | 秒 | 空闲断开并置离线 |
@@ -435,9 +436,11 @@ function encode(obj) {
 | `mqtt.broker` | `tcp://127.0.0.1:1883` | - | EMQX broker |
 | `mqtt.client_id` / `username` | `iot-platform-internal` | - | 平台内部客户端（EMQX 放行） |
 | `mqtt.password` | `internal-secret-2026` | - | 内部账号密码 |
+| `mqtt.callback_secret` | `""` | - | EMQX 认证/授权回调共享密钥：配置后回调必须携带同值 `X-Callback-Secret` 头（EMQX 认证器 headers 中配置同一密钥），防回调端点被第三方直接调用暴破口令；留空跳过 |
 | `mqtt.tls.*` | `enabled:false` / `insecure_skip_verify:true` | - | MQTT TLS / mTLS |
 | `telemetry_buffer.max_batch` | `100` | - | 批量入库最大条数 |
 | `telemetry_buffer.flush_interval` | `1` | 秒 | 缓冲 flush 间隔 |
+| `telemetry_buffer.workers` | `64` | - | 遥测处理 worker 数（按设备哈希分片保序；0=默认 64） |
 | `cache.device_ttl` | `300` | 秒 | 设备缓存 TTL |
 | `cache.shadow_flush_interval` | `5` | 秒 | 设备影子落库间隔 |
 | `poller.max_concurrent` | `50` | - | Modbus 最大并发轮询数 |

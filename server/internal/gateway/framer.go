@@ -50,6 +50,11 @@ func newFramer(p *model.Product) *framer {
 		if f.lenSize != 2 {
 			f.lenSize = 1
 		}
+		// 防御负偏移：API 层已拒绝，此处兜底钳制——负 offset 会让下方的
+		// 长度判断恒 false 并对 buf 负索引切片，直接 panic 杀死整个进程
+		if f.lenOffset < 0 {
+			f.lenOffset = 0
+		}
 		f.lenAdjust = p.FrameLenAdjust
 	default:
 		f.mode = model.FrameModeNone

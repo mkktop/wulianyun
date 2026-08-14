@@ -18,9 +18,11 @@
         </div>
         <div class="info-item" v-if="product.secretMode === 'product'">
           <div class="label">ProductSecret</div>
-          <div class="val">{{ secretVisible ? product.productSecret : '********' }}
+          <div class="val" v-if="product.productSecret">
+            {{ secretVisible ? product.productSecret : '********' }}
             <el-button link type="primary" size="small" @click="secretVisible = !secretVisible">{{ secretVisible ? '隐藏' : '查看' }}</el-button>
           </div>
+          <div class="val" v-else style="color: var(--el-text-color-secondary)">仅产品所有者可查看</div>
         </div>
         <div class="info-item"><div class="label">通信协议</div><div class="val">{{ product.protocol.toUpperCase() }}</div></div>
         <div class="info-item"><div class="label">接入方式</div><div class="val">{{ accessText(product.accessMode) }}</div></div>

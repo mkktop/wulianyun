@@ -48,15 +48,16 @@ func HTTPDeviceTelemetry(c *gin.Context) {
 		return
 	}
 
-	// 读取 body
+	// 读取 body（上限 1MB：设备遥测远小于此，无上限时恶意/异常设备可灌 GB 级 body 撑爆内存）
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "read body failed"})
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": 413, "msg": "payload too large"})
 		return
 	}
 
-	// 调用数据摄入
-	go service.HandleTelemetry(productKey, deviceName, body)
+	// 提交到有界 worker 池处理（非阻塞，满载丢弃计数；防止 DB 抖动时无界 goroutine 堆积 OOM）
+	service.SubmitTelemetry(productKey, deviceName, body)
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok"})
 }

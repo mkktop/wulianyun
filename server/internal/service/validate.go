@@ -3,15 +3,49 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
+	"time"
 
 	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
 )
 
-// LoadThingModelProps 加载产品物模型属性定义；无物模型或解析失败时返回错误
+// 物模型属性缓存：物模型变更频率极低（管理操作），而遥测热路径每条消息都要
+// 加载属性定义做校验与白名单过滤——无缓存时 5k msg/s 就是 10k QPS 的纯浪费查询。
+// 按 productID 分区 + TTL 5 分钟 + 写路径主动失效（InvalidateThingModelCache）。
+var (
+	tmCacheMu   sync.RWMutex
+	tmCache     = map[uint][]map[string]interface{}{} // productID -> 属性定义（含空切片负缓存）
+	tmCacheTime = map[uint]time.Time{}
+	tmCacheTTL  = 5 * time.Minute
+)
+
+// InvalidateThingModelCache 物模型保存/导入后使缓存失效
+func InvalidateThingModelCache(productID uint) {
+	tmCacheMu.Lock()
+	delete(tmCache, productID)
+	delete(tmCacheTime, productID)
+	tmCacheMu.Unlock()
+}
+
+// LoadThingModelProps 加载产品物模型属性定义（带 TTL 缓存）；无物模型或解析失败时返回错误
 func LoadThingModelProps(productID uint) ([]map[string]interface{}, error) {
+	tmCacheMu.RLock()
+	if t, ok := tmCacheTime[productID]; ok && time.Since(t) < tmCacheTTL {
+		if props, ok2 := tmCache[productID]; ok2 {
+			tmCacheMu.RUnlock()
+			return props, nil
+		}
+	}
+	tmCacheMu.RUnlock()
+
 	var tm model.ThingModel
 	if err := repository.DB.Where("product_id = ?", productID).First(&tm).Error; err != nil {
+		// 无物模型：负缓存空切片，避免每个无物模型产品的遥测都打一次空查询
+		tmCacheMu.Lock()
+		tmCache[productID] = nil
+		tmCacheTime[productID] = time.Now()
+		tmCacheMu.Unlock()
 		return nil, err
 	}
 	var props []map[string]interface{}
@@ -20,15 +54,27 @@ func LoadThingModelProps(productID uint) ([]map[string]interface{}, error) {
 			return nil, err
 		}
 	}
+	tmCacheMu.Lock()
+	tmCache[productID] = props
+	tmCacheTime[productID] = time.Now()
+	tmCacheMu.Unlock()
 	return props, nil
 }
 
-// ValidateTelemetry 按产品物模型校验上行遥测数据
+// ValidateTelemetry 按产品物模型校验上行遥测数据（缓存加载属性定义）
 // 返回 (是否全部合法, 错误列表)
 func ValidateTelemetry(productID uint, data map[string]interface{}) (bool, []string) {
 	props, err := LoadThingModelProps(productID)
 	if err != nil || len(props) == 0 {
 		return true, nil // 无物模型定义，放行
+	}
+	return ValidateTelemetryProps(props, data)
+}
+
+// ValidateTelemetryProps 按已加载的属性定义校验遥测数据（热路径复用同一次加载，避免二次查询）
+func ValidateTelemetryProps(props []map[string]interface{}, data map[string]interface{}) (bool, []string) {
+	if len(props) == 0 {
+		return true, nil
 	}
 
 	// 建立属性定义映射

@@ -105,7 +105,7 @@ func TestDispatchFromOtherInstance(t *testing.T) {
 		InstanceID: "other-instance",
 		UserID:     1,
 		OnlyDevice: uintPtrTest(7),
-		Msg:        OutMsg{Type: "telemetry", DeviceID: 7, Payload: map[string]interface{}{"y": 2}},
+		Msg:        marshalForTest(OutMsg{Type: "telemetry", DeviceID: 7, Payload: map[string]interface{}{"y": 2}}),
 	}
 	bmData, _ := json.Marshal(other)
 	h.localDispatch(bmData)
@@ -117,3 +117,9 @@ func TestDispatchFromOtherInstance(t *testing.T) {
 }
 
 func uintPtrTest(v uint) *uint { return &v }
+
+// marshalForTest 测试辅助：OutMsg 序列化为 RawMessage（广播消息的 Msg 字段格式）
+func marshalForTest(m OutMsg) json.RawMessage {
+	data, _ := json.Marshal(m)
+	return data
+}

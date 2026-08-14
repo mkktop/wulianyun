@@ -167,7 +167,7 @@ func evalCondition(cond json.RawMessage, data map[string]interface{}) evalResult
 		switch strings.ToLower(compound.Logic) {
 		case "and":
 			if len(compound.Conditions) == 0 {
-				return evalFalse
+				return evalIndeterminate // 空条件视为无法判定：误判为假会触发误恢复，清掉活跃告警
 			}
 			for _, c := range compound.Conditions {
 				switch evalCondition(c, data) {
@@ -179,6 +179,9 @@ func evalCondition(cond json.RawMessage, data map[string]interface{}) evalResult
 			}
 			return evalTrue
 		case "or":
+			if len(compound.Conditions) == 0 {
+				return evalIndeterminate
+			}
 			for _, c := range compound.Conditions {
 				if evalCondition(c, data) == evalTrue {
 					return evalTrue
@@ -242,26 +245,30 @@ func evalAlarmRule(r *model.Rule, d *model.Device, data map[string]interface{}) 
 	fireAlarm(r, d, act, msg, data)
 }
 
-// autoResolveAlarm 条件不满足时自动恢复 firing 状态的告警
+// autoResolveAlarm 条件不满足时自动恢复该 (规则,设备) 的所有 firing 状态告警。
+// 按 (rule,device) 批量恢复而非仅最新一条：firing 标记 TTL 过期等场景可能存在
+// 多条并存的历史 firing 行，只恢复最新一条会让旧行永久滞留 firing 状态
 func autoResolveAlarm(r *model.Rule, d *model.Device) {
 	// firing 状态缓存先查：非 firing 直接跳过，避免每包无谓 SELECT（#11）
 	if !isFiring(r, d.ID) {
 		return
 	}
-	var alarm model.Alarm
-	err := repository.DB.Where("rule_id = ? AND device_id = ? AND status = ?",
-		r.ID, d.ID, model.AlarmStatusFiring).
-		Order("id desc").First(&alarm).Error
-	if err != nil {
-		clearFiring(r, d.ID) // 缓存与库不一致，清理让下次重新判定
-		return // 没有 firing 告警
-	}
-
 	now := time.Now()
-	repository.DB.Model(&alarm).Updates(map[string]interface{}{
-		"status":      model.AlarmStatusResolved,
-		"resolved_at": now,
-	})
+	res := repository.DB.Model(&model.Alarm{}).
+		Where("rule_id = ? AND device_id = ? AND status = ?",
+			r.ID, d.ID, model.AlarmStatusFiring).
+		Updates(map[string]interface{}{
+			"status":      model.AlarmStatusResolved,
+			"resolved_at": now,
+		})
+	if res.Error != nil {
+		slog.Warn("auto resolve alarms failed", "rule", r.Name, "device", d.Name, "err", res.Error)
+		return
+	}
+	if res.RowsAffected == 0 {
+		clearFiring(r, d.ID) // 缓存与库不一致，清理让下次重新判定
+		return
+	}
 	clearFiring(r, d.ID) // 恢复后清除 firing 标记
 
 	// 发送恢复通知
@@ -367,11 +374,13 @@ func isFiring(r *model.Rule, deviceID uint) bool {
 }
 
 // markFiring 原子标记 firing：仅当未标记时设置成功（NX 语义），返回是否由本次设置
-// 多实例用 Redis SET NX EX；单实例用 sync.Map（evalAlarmRule 上游已 inSilence/firing 双检，这里二次去重防并发包）
+// 多实例用 Redis SET NX EX；单实例用 sync.Map（evalAlarmRule 上游已 inSilence/firing 双检，这里二次去重防并发包）。
+// TTL 是"clear 事件丢失（实例崩溃等）"时的兜底自愈：取 7 天——24h 会让持续超一天的
+// 告警条件重复插 firing 行；恢复路径已改为按 (rule,device) 批量恢复，兜底过期产生的重复行也会被一并清掉
 func markFiring(r *model.Rule, deviceID uint) bool {
 	key := firingKey(r.ID, deviceID)
 	if redisSilenceRDB != nil {
-		ok, err := redisSilenceRDB.SetNX(context.Background(), key, "1", 24*time.Hour).Result()
+		ok, err := redisSilenceRDB.SetNX(context.Background(), key, "1", 7*24*time.Hour).Result()
 		return err == nil && ok
 	}
 	_, loaded := firingCache.LoadOrStore(key, time.Now())
@@ -386,6 +395,13 @@ func clearFiring(r *model.Rule, deviceID uint) {
 		return
 	}
 	firingCache.Delete(key)
+}
+
+// ClearFiringState 手动处理（解决/确认）告警后清除 firing 去重门。
+// 不清除的话：条件持续为真时 markFiring 幂等去重，告警在标记存活期内（内存态=进程生命周期）
+// 永远不会再次触发，与用户"手动关掉告警、条件仍满足应重新告警"的预期相悖
+func ClearFiringState(ruleID, deviceID uint) {
+	clearFiring(&model.Rule{ID: ruleID}, deviceID)
 }
 
 func fireAlarm(r *model.Rule, d *model.Device, act alarmAction, msg string, data map[string]interface{}) {
@@ -601,7 +617,7 @@ func newSafeHTTPClient() *http.Client {
 		},
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				host, _, err := net.SplitHostPort(addr)
+				host, port, err := net.SplitHostPort(addr)
 				if err != nil {
 					return nil, err
 				}
@@ -614,17 +630,35 @@ func newSafeHTTPClient() *http.Client {
 						return nil, fmt.Errorf("目标地址不允许: %s", ip.IP)
 					}
 				}
-				return dialer.DialContext(ctx, network, addr)
+				if len(ips) == 0 {
+					return nil, fmt.Errorf("目标地址无法解析")
+				}
+				// 对已校验的 IP 直接拨号：若仍以 hostname 拨号，内核会二次解析域名，
+				// 攻击者控制的 DNS 可在校验与连接之间切换结果（DNS rebinding TOCTOU）。
+				// TLS 的 ServerName 取自原始 URL host，证书校验不受影响
+				return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
 			},
 		},
 	}
 }
+
+// webhookSem 转发/告警通知的并发上限：慢端点 + 指数退避重试时 goroutine 存活分钟级，
+// 无上限会在遥测高峰堆积数万协程；满载丢弃并告警（通知可降级，拖垮进程不可接受）
+var webhookSem = make(chan struct{}, 64)
 
 func postJSONWithRetry(rawURL string, body interface{}, maxRetries int) {
 	if err := validateWebhookURL(rawURL); err != nil {
 		slog.Warn("webhook url rejected", "url", rawURL, "err", err)
 		return
 	}
+	select {
+	case webhookSem <- struct{}{}:
+	default:
+		slog.Warn("webhook concurrency limit reached, notification dropped", "url", rawURL)
+		return
+	}
+	defer func() { <-webhookSem }()
+
 	if maxRetries <= 0 {
 		maxRetries = 3
 	}
@@ -647,10 +681,13 @@ func postJSONWithRetry(rawURL string, body interface{}, maxRetries int) {
 	}
 }
 
+// safeHTTPClient 包级单例：Transport/连接池可安全并发复用，
+// 每次请求新建 Client 会失去 Keep-Alive、放大握手与 TIME_WAIT
+var safeHTTPClient = newSafeHTTPClient()
+
 func doPostJSON(rawURL string, body interface{}) error {
 	data, _ := json.Marshal(body)
-	client := newSafeHTTPClient()
-	resp, err := client.Post(rawURL, "application/json", bytes.NewReader(data))
+	resp, err := safeHTTPClient.Post(rawURL, "application/json", bytes.NewReader(data))
 	if err != nil {
 		return err
 	}

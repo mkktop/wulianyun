@@ -516,6 +516,18 @@ func Has(productKey, deviceName string) bool {
 	return ok
 }
 
+// KickDevice 强制断开指定设备的 TCP 会话（删除设备/管理踢线场景）。
+// 仅关闭连接不直接删 map：读循环返回后由 handleConn 的 defer 走既有清理路径
+// （置离线、停 Modbus 轮询、记日志），避免绕过造成状态残留。
+func KickDevice(productKey, deviceName string) {
+	mu.RLock()
+	s, ok := sessions[productKey+"."+deviceName]
+	mu.RUnlock()
+	if ok {
+		s.conn.Close()
+	}
+}
+
 // ConnCount 当前 TCP 网关在线连接数（超管后台系统状态用）
 func ConnCount() int {
 	mu.RLock()
@@ -597,8 +609,18 @@ func Request(productKey, deviceName string, reqFrame []byte, timeout time.Durati
 	case resp := <-ch:
 		return resp, nil
 	case <-time.After(timeout):
-		// 超时后主动清空等待槽 + 失效 generation：
-		// 否则该请求的迟到应答会在 waitCh 被清前被 deliver 投递，或误匹配下一次同 slave+fn 请求（#19）
+		// 超时排空窗口：Modbus RTU 应答帧不携带请求标识，无法事后区分归属。
+		// 超时后若立即释放等待槽，本请求的迟到应答会被"下一次同 slave+fn 的请求"
+		// 误领（旧数据错配入库，真实应答反被丢弃）。因此在持有 reqMu 的状态下
+		// 再滞留一小段排空期，期间到达的匹配帧被投入已被放弃的 ch 缓冲而自然丢弃。
+		drain := timeout / 2
+		if drain > 500*time.Millisecond {
+			drain = 500 * time.Millisecond
+		}
+		if drain < 50*time.Millisecond {
+			drain = 50 * time.Millisecond
+		}
+		time.Sleep(drain)
 		s.mu.Lock()
 		s.waitCh = nil
 		s.expGen = 0

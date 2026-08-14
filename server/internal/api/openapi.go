@@ -141,8 +141,13 @@ func OpenAPIAuth() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, Resp{Code: 401, Msg: "应用归属账号已禁用"})
 			return
 		}
-		// 读取并还原请求体，计算 body 哈希参与签名
-		bodyBytes, _ := io.ReadAll(c.Request.Body)
+		// 读取并还原请求体，计算 body 哈希参与签名（上限 1MB，防恶意大 body 撑爆内存）
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+		bodyBytes, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, Resp{Code: 413, Msg: "请求体过大"})
+			return
+		}
 		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		expect := openapiSignString(app.AppSecret, c.Request.Method, c.Request.URL.RequestURI(), bodyBytes, appKey, tsStr)
 		if !hmac.Equal([]byte(expect), []byte(sign)) {

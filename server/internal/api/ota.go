@@ -77,58 +77,61 @@ func CreateFirmware(c *gin.Context) {
 	}
 	description := c.PostForm("description")
 
-	// 校验产品归属（owner 或被下放）
-	if _, e := canViewProduct(c, productID); e != nil {
+	// 校验产品归属：固件上传属产品定义变更，仅 owner/超管（二级账号对被下放产品只读，
+	// 与物模型/编解码/点位一致用 mustOwnProduct，防止污染一级产品的固件版本列表）
+	if _, e := mustOwnProduct(c, productID); e != nil {
 		Fail(c, 404, "产品不存在")
 		return
 	}
 
 	// 处理文件上传（服务端强制 body 上限，nginx client_max_body_size 之外的第二道防线，防涨盘）
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxFirmwareUpload)
-	var fileURL string
-	var fileSize int64
-	var checksum string
-	var crc32Val uint32
 
 	file, header, err := c.Request.FormFile("file")
-	if err == nil {
-		defer file.Close()
-		// 安全文件名：只保留字母数字和点，防止路径穿越
-		safeName := strings.Map(func(r rune) rune {
-			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
-				return r
-			}
-			return '_'
-		}, header.Filename)
-		// 扩展名白名单：只允许固件二进制类型，杜绝 .html/.svg 等被同源渲染（存储型 XSS）
-		ext := strings.ToLower(filepath.Ext(safeName))
-		if !firmwareExtAllowed[ext] {
-			Fail(c, 400, "仅支持固件文件类型（bin/hex/img/zip/tar/gz/pack 等）")
-			return
-		}
-		// 对象名：firmware/{产品ID}_{版本}_{时间戳}_{随机串}_{文件名}
-		// 随机串使 URL 不可猜测（公开读桶下代替签名防越权下载），且 URL 短而永久，适配 4G 模组
-		randBytes := make([]byte, 4)
-		if _, err := rand.Read(randBytes); err != nil {
-			Fail(c, 500, "生成对象名失败")
-			return
-		}
-		key := fmt.Sprintf("firmware/%d_%s_%d_%x_%s",
-			productID, version, time.Now().Unix(), randBytes, safeName)
-
-		// 边传边算 SHA-256（完整性校验，已有）+ CRC32/IEEE（轻量快速校验，便于低算力设备先做粗校验）
-		sha := sha256.New()
-		crc := crc32.NewIEEE()
-		if err := storage.Default.Put(c.Request.Context(), key, io.TeeReader(file, io.MultiWriter(sha, crc)), header.Size); err != nil {
-			slog.Error("store firmware failed", "key", key, "err", err)
-			Fail(c, 500, "保存文件失败")
-			return
-		}
-		fileURL = storage.Default.URL(key)
-		fileSize = header.Size
-		checksum = hex.EncodeToString(sha.Sum(nil))
-		crc32Val = crc.Sum32()
+	if err != nil {
+		// 缺文件/非 multipart 时直接拒绝：否则会静默创建无文件、无校验和的"空固件"记录
+		Fail(c, 400, "固件文件必填（multipart form-data 的 file 字段）")
+		return
 	}
+	defer file.Close()
+
+	// 安全文件名：只保留字母数字和点，防止路径穿越
+	safeName := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
+			return r
+		}
+		return '_'
+	}, header.Filename)
+	// 扩展名白名单：只允许固件二进制类型，杜绝 .html/.svg 等被同源渲染（存储型 XSS）
+	ext := strings.ToLower(filepath.Ext(safeName))
+	if !firmwareExtAllowed[ext] {
+		Fail(c, 400, "仅支持固件文件类型（bin/hex/img/zip/tar/gz/pack 等）")
+		return
+	}
+	// 对象名：firmware/{产品ID}_{版本}_{时间戳}_{随机串}_{文件名}
+	// 随机串使 URL 不可猜测（公开读桶下代替签名防越权下载），且 URL 短而永久，适配 4G 模组。
+	// 随机段取 16 字节（128 bit）：此前 4 字节仅 32 bit 熵，产品ID/版本/秒级时间戳可推测，
+	// 全空间枚举即可拖走全部固件包（固件泄露即提供逆向面）
+	randBytes := make([]byte, 16)
+	if _, err := rand.Read(randBytes); err != nil {
+		Fail(c, 500, "生成对象名失败")
+		return
+	}
+	key := fmt.Sprintf("firmware/%d_%s_%d_%x_%s",
+		productID, version, time.Now().Unix(), randBytes, safeName)
+
+	// 边传边算 SHA-256（完整性校验）+ CRC32/IEEE（轻量快速校验，便于低算力设备先做粗校验）
+	sha := sha256.New()
+	crc := crc32.NewIEEE()
+	if err := storage.Default.Put(c.Request.Context(), key, io.TeeReader(file, io.MultiWriter(sha, crc)), header.Size); err != nil {
+		slog.Error("store firmware failed", "key", key, "err", err)
+		Fail(c, 500, "保存文件失败")
+		return
+	}
+	fileURL := storage.Default.URL(key)
+	fileSize := header.Size
+	checksum := hex.EncodeToString(sha.Sum(nil))
+	crc32Val := crc.Sum32()
 
 	fw := model.Firmware{
 		UserID:      UID(c),

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -202,6 +203,14 @@ func BatchCreateDevices(c *gin.Context) {
 	seen := map[string]bool{}
 	for _, name := range req.Names {
 		if name == "" {
+			continue
+		}
+		if strings.HasPrefix(name, ".") {
+			failed = append(failed, failItem{Name: name, Reason: "不能以点号开头"})
+			continue
+		}
+		if strings.ContainsAny(name, "/+#") {
+			failed = append(failed, failItem{Name: name, Reason: "不能包含 / + # 字符"})
 			continue
 		}
 		if seen[name] {

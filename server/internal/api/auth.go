@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -155,7 +156,7 @@ func ChangePassword(c *gin.Context) {
 }
 
 // EnsureAdmin 初始化默认管理员；首次无 admin 用户时生效一次。
-// 密码取 config.C.AdminPassword，为空则回退默认 admin123。
+// 密码取 config.C.AdminPassword，为空则回退默认 admin123（仅首次无 admin 时生效）。
 func EnsureAdmin() {
 	var cnt int64
 	repository.DB.Model(&model.User{}).Where("username = ?", "admin").Count(&cnt)
@@ -163,6 +164,8 @@ func EnsureAdmin() {
 		pwd := config.C.AdminPassword
 		if pwd == "" {
 			pwd = "admin123"
+			slog.Error("⚠ 使用默认管理员密码 admin123 创建超管账号——"+
+				"公网部署必须立即修改，或在配置中设置 admin_password / 环境变量后重启")
 		}
 		hash, _ := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
 		repository.DB.Create(&model.User{Username: "admin", PasswordHash: string(hash), Nickname: "管理员", Role: "admin"})

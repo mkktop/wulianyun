@@ -62,14 +62,19 @@ func main() {
 
 	// 初始化性能组件
 	service.InitDeviceCache(config.C.Cache.DeviceTTL)
+	service.InitProductCache(60)
 	service.InitTelemetryBuffer(config.C.TelemetryBuffer.MaxBatch, config.C.TelemetryBuffer.FlushInterval)
+	service.InitTelemetryWorkers(config.C.TelemetryBuffer.Workers, 512)
 	service.InitLogBuffer(200, 2) // 轨迹/设备日志批量化，避免每包 INSERT 抢占连接池（#17）
 	service.InitShadowCache(config.C.Cache.ShadowFlushInterval)
 	poller.InitPollerSemaphore(config.C.Poller.MaxConcurrent)
 
-	// 多实例：Redis Pub/Sub 跨实例广播 WebSocket 消息
-	ws.RedisPubSub = repository.NewRedisPubSub()
-	ws.StartPubSub()
+	// 多实例：Redis Pub/Sub 跨实例广播 WebSocket 消息。
+	// 单实例不启用——每条遥测 × 每个接收人都会 PUBLISH，无人订阅的广播纯耗 Redis 与 CPU
+	if config.C.MultiInstance {
+		ws.RedisPubSub = repository.NewRedisPubSub()
+		ws.StartPubSub()
+	}
 
 	// 多实例：轮询分布式锁初始化
 	poller.InitDistributedLock()
@@ -105,10 +110,10 @@ func main() {
 	service.DownPublisher = func(productKey, deviceName string, payload []byte) error {
 		var err error
 		channel := "mqtt"
+		// 产品配置走 TTL 缓存：高频下发的每次 SELECT 是纯浪费（接入方式/协议创建后不可变）
+		p, perr := service.FindProductByKey(productKey)
 		if gateway.Has(productKey, deviceName) {
-			var p model.Product
-			if repository.DB.Select("access_mode").Where("product_key = ?", productKey).First(&p).Error == nil &&
-				p.AccessMode == model.AccessModeModbus {
+			if perr == nil && p.AccessMode == model.AccessModeModbus {
 				channel = "modbus"
 				err = poller.WriteProperty(productKey, deviceName, payload)
 			} else {
@@ -117,9 +122,7 @@ func main() {
 			}
 		} else {
 			// 无本实例 TCP 连接：按产品协议分流
-			var p model.Product
-			if repository.DB.Select("protocol").Where("product_key = ?", productKey).First(&p).Error == nil &&
-				p.Protocol == "tcp" {
+			if perr == nil && p.Protocol == "tcp" {
 				// TCP/DTU 设备（可能连接在其他实例）：Redis 扇出
 				channel = "tcp"
 				err = service.PublishDown(productKey, deviceName, payload)

@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"iot-platform/internal/gateway"
 	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
 	"iot-platform/internal/service"
@@ -41,6 +44,10 @@ func CreateDevice(c *gin.Context) {
 		Fail(c, 400, "设备名称不能以点号开头")
 		return
 	}
+	if msg := validateDeviceName(req.Name); msg != "" {
+		Fail(c, 400, msg)
+		return
+	}
 	p, err := canViewProduct(c, req.ProductID)
 	if err != nil {
 		Fail(c, 404, "产品不存在或未下放")
@@ -67,6 +74,16 @@ func CreateDevice(c *gin.Context) {
 	}
 	d.ProductName = p.Name
 	OK(c, d)
+}
+
+// validateDeviceName 设备名字符校验：禁止 MQTT 主题通配符与路径分隔符——
+// 设备名会进入 topic（thing/up/{pk}/{dn}），含 / 会让同产品设备 A("x") 的 ACL
+// 放行设备 B("x/y") 的主题前缀，造成跨设备主题混淆
+func validateDeviceName(name string) string {
+	if strings.ContainsAny(name, "/+#") {
+		return "设备名称不能包含 / + # 字符"
+	}
+	return ""
 }
 
 // @Summary      设备列表
@@ -105,29 +122,44 @@ func ListDevices(c *gin.Context) {
 		Fail(c, 500, "查询失败")
 		return
 	}
-	// 补充产品与分组名称
-	pidNames := map[uint]string{}
-	gidNames := map[uint]string{}
-	for i := range list {
-		if name, ok := pidNames[list[i].ProductID]; ok {
-			list[i].ProductName = name
-		} else {
-			var p model.Product
-			if repository.DB.Select("name").First(&p, list[i].ProductID).Error == nil {
-				pidNames[list[i].ProductID] = p.Name
-				list[i].ProductName = p.Name
+	// 批量补充产品与分组名称（IN 查询，替代逐行 First 的 N+1）
+	if len(list) > 0 {
+		pidSet := map[uint]bool{}
+		gidSet := map[uint]bool{}
+		for i := range list {
+			pidSet[list[i].ProductID] = true
+			if list[i].GroupID > 0 {
+				gidSet[list[i].GroupID] = true
 			}
 		}
-		if list[i].GroupID > 0 {
-			if name, ok := gidNames[list[i].GroupID]; ok {
-				list[i].GroupName = name
-			} else {
-				var g model.DeviceGroup
-				if repository.DB.Select("name").First(&g, list[i].GroupID).Error == nil {
-					gidNames[list[i].GroupID] = g.Name
-					list[i].GroupName = g.Name
-				}
+		pids := make([]uint, 0, len(pidSet))
+		for id := range pidSet {
+			pids = append(pids, id)
+		}
+		var products []model.Product
+		repository.DB.Select("id, name").Where("id IN ?", pids).Find(&products)
+		pidNames := make(map[uint]string, len(products))
+		for _, p := range products {
+			pidNames[p.ID] = p.Name
+		}
+		gidNames := map[uint]string{}
+		if len(gidSet) > 0 {
+			gids := make([]uint, 0, len(gidSet))
+			for id := range gidSet {
+				gids = append(gids, id)
 			}
+			var groups []model.DeviceGroup
+			repository.DB.Select("id, name").Where("id IN ?", gids).Find(&groups)
+			for _, g := range groups {
+				gidNames[g.ID] = g.Name
+			}
+		}
+		for i := range list {
+			list[i].ProductName = pidNames[list[i].ProductID]
+			list[i].GroupName = gidNames[list[i].GroupID]
+			// 列表不打码设备密钥会被整页导出（浏览器缓存/截图扩大泄露面）；
+			// 密钥在详情页"显示密钥"操作中按需获取
+			list[i].Secret = ""
 		}
 	}
 	OK(c, PageData{Total: total, List: list})
@@ -211,9 +243,18 @@ func DeleteDevice(c *gin.Context) {
 		Fail(c, 404, "设备不存在")
 		return
 	}
+	// 先踢 TCP 会话：连接关闭后 handleConn 的 defer 走既有下线路径
+	// （置离线、停 Modbus 轮询、记录日志），否则已删设备的会话与轮询会一直残留空转
+	gateway.KickDevice(d.ProductKey, d.Name)
 	repository.DB.Delete(&d)
 	repository.DB.Where("device_id = ?", d.ID).Delete(&model.DeviceEvent{})
+	repository.DB.Where("device_id = ?", d.ID).Delete(&model.DeviceShadow{})
 	service.InvalidateDeviceCache(d.ProductKey, d.Name)
+	service.InvalidateShadowCache(d.ID)
+	// 清理 Redis 最新值缓存
+	if repository.RDB != nil {
+		_ = repository.RDB.Del(context.Background(), "device:latest:"+strconv.FormatUint(uint64(d.ID), 10)).Err()
+	}
 	OK(c, nil)
 }
 

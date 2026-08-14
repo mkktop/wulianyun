@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -10,10 +11,29 @@ import (
 	"iot-platform/internal/service"
 )
 
+// secureEqual 常量时间字符串比较（认证口令防时序侧信道）
+func secureEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+// verifyCallbackSecret EMQX 回调来源校验：配置了 callback_secret 时强制校验共享密钥头，
+// 防止回调端点被第三方直接调用充当"口令暴破 oracle"（EMQX 侧在认证器 headers 中携带同一密钥）
+func verifyCallbackSecret(c *gin.Context) bool {
+	sec := config.C.MQTT.CallbackSecret
+	if sec == "" {
+		return true // 未配置则跳过（兼容存量部署）
+	}
+	return secureEqual(c.GetHeader("X-Callback-Secret"), sec)
+}
+
 // EmqxAuth EMQX HTTP 认证回调
 // 设备约定：clientid = {productKey}.{deviceName}，password = 设备 Secret 或动态 Token
 // 返回 {"result":"allow"} / {"result":"deny"}
 func EmqxAuth(c *gin.Context) {
+	if !verifyCallbackSecret(c) {
+		c.JSON(200, gin.H{"result": "deny"})
+		return
+	}
 	var req struct {
 		ClientID  string `json:"clientid"`
 		Username  string `json:"username"`
@@ -25,8 +45,8 @@ func EmqxAuth(c *gin.Context) {
 		return
 	}
 
-	// 平台内部客户端放行
-	if req.Username == config.C.MQTT.Username && req.Password == config.C.MQTT.Password {
+	// 平台内部客户端放行（常量时间比较）
+	if secureEqual(req.Username, config.C.MQTT.Username) && secureEqual(req.Password, config.C.MQTT.Password) {
 		c.JSON(200, gin.H{"result": "allow", "is_superuser": true})
 		return
 	}
@@ -80,6 +100,10 @@ func EmqxAuth(c *gin.Context) {
 //   订阅: thing/down/{pk}/{dn}[/...], thing/broadcast/{pk}, thing/gateway/{pk}/{dn}/sub/+
 //   遗嘱: thing/offline/{pk}/{dn}（设备发布自己的遗嘱）
 func EmqxACL(c *gin.Context) {
+	if !verifyCallbackSecret(c) {
+		c.JSON(200, gin.H{"result": "deny"})
+		return
+	}
 	var req struct {
 		ClientID string `json:"clientid"`
 		Username string `json:"username"`
@@ -90,7 +114,7 @@ func EmqxACL(c *gin.Context) {
 		c.JSON(200, gin.H{"result": "deny"})
 		return
 	}
-	// 平台内部客户端直接放行
+	// 平台内部客户端直接放行（认证阶段已验证口令；ACL 阶段仅匹配用户名）
 	if req.Username == config.C.MQTT.Username {
 		c.JSON(200, gin.H{"result": "allow"})
 		return

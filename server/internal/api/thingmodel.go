@@ -9,6 +9,7 @@ import (
 
 	"iot-platform/internal/model"
 	"iot-platform/internal/repository"
+	"iot-platform/internal/service"
 )
 
 // TSL 数据类型与保留字
@@ -151,6 +152,7 @@ func SaveThingModel(c *gin.Context) {
 			"properties": props, "events": events, "services": svcs,
 		})
 	}
+	service.InvalidateThingModelCache(p.ID) // 物模型变更后失效热路径缓存
 	OK(c, tm)
 }
 
@@ -269,5 +271,6 @@ func ImportThingModel(c *gin.Context) {
 			"properties": props, "events": events, "services": svcs,
 		})
 	}
+	service.InvalidateThingModelCache(p.ID) // 物模型变更后失效热路径缓存
 	OK(c, tm)
 }

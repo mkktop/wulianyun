@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -61,25 +62,28 @@ func FindDevice(productKey, deviceName string) (*model.Device, error) {
 //   - 一机一密：校验设备独立 Secret
 //   - 一型一密：secret == 产品 ProductSecret 时，设备不存在则动态注册（自动建设备并生成独立 Secret）
 func FindDeviceForAuth(productKey, deviceName, secret string) (*model.Device, error) {
-	var p model.Product
-	if err := repository.DB.Where("product_key = ?", productKey).First(&p).Error; err != nil {
+	p, err := FindProductByKey(productKey)
+	if err != nil {
 		return nil, errors.New("产品不存在")
 	}
 
 	d, err := FindDevice(productKey, deviceName)
 	if err == nil {
-		// 设备已存在：一型一密下允许用设备密钥或产品密钥，一机一密仅设备密钥
-		if d.Secret == secret {
+		// 设备已存在：一型一密下允许用设备密钥或产品密钥，一机一密仅设备密钥。
+		// 比较用常量时间（防认证口令时序侧信道）
+		if subtle.ConstantTimeCompare([]byte(d.Secret), []byte(secret)) == 1 {
 			return d, nil
 		}
-		if p.SecretMode == model.SecretModeProduct && p.ProductSecret != "" && secret == p.ProductSecret {
+		if p.SecretMode == model.SecretModeProduct && p.ProductSecret != "" &&
+			subtle.ConstantTimeCompare([]byte(p.ProductSecret), []byte(secret)) == 1 {
 			return d, nil
 		}
 		return nil, errors.New("密钥错误")
 	}
 
 	// 设备不存在：仅一型一密且密钥匹配产品密钥时动态注册
-	if p.SecretMode == model.SecretModeProduct && p.ProductSecret != "" && secret == p.ProductSecret {
+	if p.SecretMode == model.SecretModeProduct && p.ProductSecret != "" &&
+		subtle.ConstantTimeCompare([]byte(p.ProductSecret), []byte(secret)) == 1 {
 		nd := model.Device{
 			UserID: p.UserID, ProductID: p.ID, ProductKey: productKey,
 			Name: deviceName, Secret: randSecret(),
@@ -199,9 +203,10 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 
 	now := time.Now()
 
-	// TSL 物模型校验
+	// TSL 物模型校验（属性定义一次加载，校验与白名单过滤复用，避免同消息两次查库）
 	t1 := time.Now()
-	valid, validationErrors := ValidateTelemetry(d.ProductID, data)
+	props, _ := LoadThingModelProps(d.ProductID)
+	valid, validationErrors := ValidateTelemetryProps(props, data)
 
 	// 快慢路径分离：EMQX 规则引擎开启时跳过 DB 写入（快路径），仅做业务逻辑
 	if !config.C.EMQXRule.Enabled {
@@ -220,7 +225,7 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	// 最新值白名单：有物模型时只合并已定义属性；无论是否有物模型，都剔除系统方法键，
 	// 防止指令应答/未知 method 的 messageId/code/params/id 等污染实时数据与影子（#15）
 	mergeData := stripNonTelemetryKeys(data)
-	if props, err := LoadThingModelProps(d.ProductID); err == nil && len(props) > 0 {
+	if len(props) > 0 {
 		allowed := make(map[string]bool, len(props))
 		for _, p := range props {
 			if id, ok := p["identifier"].(string); ok {
@@ -240,10 +245,12 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	if valid && len(mergeData) > 0 {
 		// 最新值缓存：按属性合并（Redis Lua 原子操作，避免竞态）
 		mergePayload, _ := json.Marshal(mergeData)
-		mergeLatestScript.Run(context.Background(), repository.RDB,
+		if err := mergeLatestScript.Run(context.Background(), repository.RDB,
 			[]string{latestKey(d.ID)},
 			string(mergePayload), fmt.Sprintf("%d", now.UnixMilli()),
-		)
+		).Err(); err != nil {
+			slog.Warn("merge latest cache failed", "device", d.Name, "err", err)
+		}
 
 		// 实时推送：设备归属者 + 其一级父账号（一级实时看二级设备曲线）
 		telemetryMsg := map[string]interface{}{"ts": now.UnixMilli(), "data": mergeData}
@@ -257,7 +264,7 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	}
 	t3 := time.Now()
 
-	// 写入消息轨迹（批量化 worker 异步落库）
+	// 写入消息轨迹（批量化 worker 异步落库）；payload 截断防止超大报文 3 倍写放大
 	traceStatus := "ok"
 	if !valid {
 		traceStatus = "validation_failed"
@@ -265,7 +272,7 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	writeTrace(&model.MessageTrace{
 		TraceID: traceID, UserID: d.UserID, ProductKey: productKey, DeviceName: deviceName,
 		DeviceID: d.ID, Direction: "up", Stage: "completed", Status: traceStatus,
-		Payload: string(payload),
+		Payload: truncateStr(string(payload), 2048),
 		IngestMs: int(t1.Sub(t0).Milliseconds()),
 		DecodeMs: 0,
 		StoreMs:  int(t2.Sub(t1).Milliseconds()),
@@ -273,7 +280,15 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	})
 
 	// 写入设备日志（批量化 worker 异步落库）
-	writeDeviceLog(d.UserID, d.ID, d.Name, "data_up", fmt.Sprintf("上报 %d 个属性", len(data)), string(payload), traceID)
+	writeDeviceLog(d.UserID, d.ID, d.Name, "data_up", fmt.Sprintf("上报 %d 个属性", len(data)), truncateStr(string(payload), 2048), traceID)
+}
+
+// truncateStr 超长字符串截断（轨迹/日志 payload 防写放大；完整原文仍在遥测超表 data 列）
+func truncateStr(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
 }
 
 // HandleDeviceStatus 处理上下线事件
