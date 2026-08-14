@@ -85,3 +85,33 @@ func TestDecodeRoundTrip(t *testing.T) {
 		t.Errorf("encode out = %v, want [255]", out)
 	}
 }
+
+// TestVMPoolReuse VM 池复用语义：同脚本多次 Decode 应正常；
+// 脚本变更后旧 VM 不误用（哈希不同重新构造）。
+func TestVMPoolReuse(t *testing.T) {
+	scriptA := "function decode(bytes) { return {v: bytes[0]} }"
+	scriptB := "function decode(bytes) { return {v: bytes[0] * 2} }"
+	for i := 0; i < 5; i++ {
+		out, err := Decode(99, scriptA, []byte{21})
+		if err != nil || out["v"] != int64(21) {
+			t.Fatalf("脚本A 第 %d 次解码失败: %v %v", i, out, err)
+		}
+	}
+	out, err := Decode(99, scriptB, []byte{21})
+	if err != nil || out["v"] != int64(42) {
+		t.Fatalf("换脚本后应使用新 VM（值×2），得到 %v %v", out, err)
+	}
+}
+
+// TestVMPoolDiscardOnError 执行出错（抛异常）的 VM 应被丢弃：
+// 若错误 VM 被复用，全局状态/异常标志会泄漏到下一次调用
+func TestVMPoolDiscardOnError(t *testing.T) {
+	script := `function decode(bytes) { if (bytes[0] === 0) { throw new Error('boom') } return {v: 1} }`
+	if _, err := Decode(100, script, []byte{0}); err == nil {
+		t.Fatal("第一次调用应报错（脚本抛异常）")
+	}
+	out, err := Decode(100, script, []byte{5})
+	if err != nil || out["v"] != int64(1) {
+		t.Fatalf("错误后重试应正常: %v %v", out, err)
+	}
+}

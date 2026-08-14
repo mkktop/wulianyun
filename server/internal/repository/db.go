@@ -20,6 +20,23 @@ var (
 	RDB *redis.Client
 )
 
+// queryTimeout 热路径查询/写入的统一短超时。
+// 背景：热路径大量运行在无请求上下文的后台协程（遥测 ingest/规则/影子/缓冲 flush），
+// context.Background() 下 DB 网络挂起会无限占用连接（ConnMaxLifetime 1800s 才回收），
+// 池耗尽后所有请求排进 database/sql 的无界等待队列，与遥测协程堆积叠加放大成全局瘫痪。
+// 批量写入等长操作可按需用 CtxWith 自定时长。
+const queryTimeout = 5 * time.Second
+
+// Ctx 返回带热路径超时的 context（调用方须 defer cancel 释放）
+func Ctx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), queryTimeout)
+}
+
+// CtxWith 自定超时时长的热路径 context
+func CtxWith(d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), d)
+}
+
 func Init() error {
 	db, err := gorm.Open(postgres.Open(config.C.Database.DSN), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Warn),

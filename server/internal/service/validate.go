@@ -40,7 +40,9 @@ func LoadThingModelProps(productID uint) ([]map[string]interface{}, error) {
 	tmCacheMu.RUnlock()
 
 	var tm model.ThingModel
-	if err := repository.DB.Where("product_id = ?", productID).First(&tm).Error; err != nil {
+	ctx, cancel := repository.Ctx()
+	defer cancel()
+	if err := repository.DB.WithContext(ctx).Where("product_id = ?", productID).First(&tm).Error; err != nil {
 		// 无物模型：负缓存空切片，避免每个无物模型产品的遥测都打一次空查询
 		tmCacheMu.Lock()
 		tmCache[productID] = nil

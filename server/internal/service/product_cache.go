@@ -32,7 +32,9 @@ func FindProductByKey(productKey string) (*model.Product, error) {
 		productCache.Delete(productKey)
 	}
 	var p model.Product
-	if err := repository.DB.Where("product_key = ?", productKey).First(&p).Error; err != nil {
+	ctx, cancel := repository.Ctx()
+	defer cancel()
+	if err := repository.DB.WithContext(ctx).Where("product_key = ?", productKey).First(&p).Error; err != nil {
 		return nil, err
 	}
 	productCache.Store(productKey, &productCacheEntry{product: &p, expiresAt: time.Now().Add(productCacheTTL)})

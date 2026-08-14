@@ -219,10 +219,44 @@ var (
 	mu       sync.RWMutex
 	sessions = map[string]*session{} // key: productKey.deviceName
 
+	// productSessions 产品级二级索引：productKey -> deviceName -> session。
+	// 广播按产品定位在线连接，避免每次 O(N) 全量扫描 sessions（万级连接时广播风暴）
+	productSessions = map[string]map[string]*session{}
+
 	// 上下线钩子（由 poller 注入，用于 Modbus 设备启停轮询；避免循环依赖）
 	OnDeviceConnect    func(productKey, deviceName string, productID uint)
 	OnDeviceDisconnect func(productKey, deviceName string)
 )
+
+// registerSession 登记会话（含产品索引）；顶替旧连接时同步移除旧条目
+func registerSession(key, productKey, deviceName string, s *session) {
+	mu.Lock()
+	defer mu.Unlock()
+	sessions[key] = s
+	if productSessions[productKey] == nil {
+		productSessions[productKey] = map[string]*session{}
+	}
+	productSessions[productKey][deviceName] = s
+}
+
+// unregisterSession 移除会话（含产品索引）；仅当仍是当前会话时生效（防误删顶替者）
+func unregisterSession(key, productKey, deviceName string, s *session) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	if cur, ok := sessions[key]; !ok || cur != s {
+		return false
+	}
+	delete(sessions, key)
+	if m := productSessions[productKey]; m != nil {
+		if cur, ok := m[deviceName]; ok && cur == s {
+			delete(m, deviceName)
+		}
+		if len(m) == 0 {
+			delete(productSessions, productKey)
+		}
+	}
+	return true
+}
 
 func idleTimeout() time.Duration {
 	if config.C.Gateway.IdleTimeout <= 0 {
@@ -368,8 +402,8 @@ func handleConn(conn net.Conn) {
 	if old, ok := sessions[key]; ok {
 		old.conn.Close()
 	}
-	sessions[key] = s
 	mu.Unlock()
+	registerSession(key, productKey, deviceName, s)
 
 	service.QueueStatus(clientID, true, 0)
 	if OnDeviceConnect != nil {
@@ -378,19 +412,14 @@ func handleConn(conn net.Conn) {
 	slog.Info("dtu connected", "device", key, "remote", conn.RemoteAddr().String())
 
 	defer func() {
-		mu.Lock()
-		// 仅当仍是当前会话时清理（避免被新连接顶替后误置离线）
-		if cur, ok := sessions[key]; ok && cur == s {
-			delete(sessions, key)
-			mu.Unlock()
+		// 仅当仍是当前会话时清理（避免被新连接顶替后误置离线）；unregisterSession 内部自管锁
+		if unregisterSession(key, productKey, deviceName, s) {
 			service.QueueStatus(clientID, false, 0)
 			if OnDeviceDisconnect != nil {
 				OnDeviceDisconnect(productKey, deviceName)
 			}
 			// TCP 断线重连引导：记录断开原因，设备端固件可据此执行指数退避重连
 			writeReconnectGuidance(productKey, deviceName, conn)
-		} else {
-			mu.Unlock()
 		}
 		slog.Info("dtu disconnected", "device", key)
 	}()
@@ -557,21 +586,19 @@ func Send(productKey, deviceName string, payload []byte) error {
 	return err
 }
 
-// Broadcast 向某产品下所有在线 TCP 设备下发（复用 Send 的 codec 编码逻辑，收集写错误）
+// Broadcast 向某产品下所有在线 TCP 设备下发（复用 Send 的 codec 编码逻辑，收集写错误）。
+// 目标连接经产品级二级索引 O(1) 定位，不再全量扫描会话表
 func Broadcast(productKey string, payload []byte) error {
 	mu.RLock()
-	var targets []string
-	prefix := productKey + "."
-	for key := range sessions {
-		if strings.HasPrefix(key, prefix) {
-			targets = append(targets, key)
-		}
+	m := productSessions[productKey]
+	names := make([]string, 0, len(m))
+	for dn := range m {
+		names = append(names, dn)
 	}
 	mu.RUnlock()
 
 	var errs []string
-	for _, key := range targets {
-		dn := strings.TrimPrefix(key, prefix)
+	for _, dn := range names {
 		if err := Send(productKey, dn, payload); err != nil {
 			errs = append(errs, dn+": "+err.Error())
 		}

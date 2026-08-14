@@ -36,6 +36,11 @@ func UseRedisSilence(rdb *redis.Client) {
 	redisSilenceRDB = rdb
 }
 
+// redisCtx 规则引擎 Redis 操作的短超时 context（每包热路径，防 Redis 挂起拖垮 worker）
+func redisCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 2*time.Second)
+}
+
 // RecipientResolver 由 main 注入：把一个用户展开为"应接收其实时数据/告警"的用户集合
 // （含其一级父账号，便于一级实时看二级设备的告警）。nil 时只推该用户本身。
 var RecipientResolver func(uint) []uint
@@ -89,7 +94,9 @@ func loadRulesForUser(userID uint) []model.Rule {
 	}
 	// 只加载该用户的规则（按 userID 分区，不再全表加载）
 	var rules []model.Rule
-	repository.DB.Where("enabled = ? AND user_id = ?", true, userID).Find(&rules)
+	ctx, cancel := repository.Ctx()
+	defer cancel()
+	repository.DB.WithContext(ctx).Where("enabled = ? AND user_id = ?", true, userID).Find(&rules)
 	if rules == nil {
 		rules = []model.Rule{} // 显式空切片，区分"未查询"与"查无规则"
 	}
@@ -254,7 +261,9 @@ func autoResolveAlarm(r *model.Rule, d *model.Device) {
 		return
 	}
 	now := time.Now()
-	res := repository.DB.Model(&model.Alarm{}).
+	resCtx, resCancel := repository.Ctx()
+	defer resCancel()
+	res := repository.DB.WithContext(resCtx).Model(&model.Alarm{}).
 		Where("rule_id = ? AND device_id = ? AND status = ?",
 			r.ID, d.ID, model.AlarmStatusFiring).
 		Updates(map[string]interface{}{
@@ -298,7 +307,9 @@ func autoResolveAlarm(r *model.Rule, d *model.Device) {
 // EvalOffline 离线巡检（定时器调用）：设备离线超过 N 分钟触发
 func EvalOffline() {
 	var rules []model.Rule
-	repository.DB.Where("enabled = true AND type = ?", model.RuleTypeOffline).Find(&rules)
+	ctx, cancel := repository.Ctx()
+	defer cancel()
+	repository.DB.WithContext(ctx).Where("enabled = true AND type = ?", model.RuleTypeOffline).Find(&rules)
 	for i := range rules {
 		r := &rules[i]
 		var cond struct {
@@ -319,7 +330,7 @@ func EvalOffline() {
 			q = q.Where("id = ?", r.DeviceID)
 		}
 		var devices []model.Device
-		q.Find(&devices)
+		q.WithContext(ctx).Find(&devices)
 
 		var act alarmAction
 		json.Unmarshal(r.Action, &act)
@@ -341,7 +352,9 @@ func EvalOffline() {
 // ResolveOfflineAlarms 设备上线时自动恢复其所有 firing 状态的离线告警（#9 上线分支）
 func ResolveOfflineAlarms(d *model.Device) {
 	var rules []model.Rule
-	repository.DB.Where("enabled = true AND type = ? AND user_id = ?", model.RuleTypeOffline, d.UserID).Find(&rules)
+	ctx, cancel := repository.Ctx()
+	defer cancel()
+	repository.DB.WithContext(ctx).Where("enabled = true AND type = ? AND user_id = ?", model.RuleTypeOffline, d.UserID).Find(&rules)
 	for i := range rules {
 		autoResolveAlarm(&rules[i], d)
 	}
@@ -366,7 +379,9 @@ func firingKey(ruleID, deviceID uint) string {
 func isFiring(r *model.Rule, deviceID uint) bool {
 	key := firingKey(r.ID, deviceID)
 	if redisSilenceRDB != nil {
-		val, err := redisSilenceRDB.Get(context.Background(), key).Result()
+		ctx, cancel := redisCtx()
+		defer cancel()
+		val, err := redisSilenceRDB.Get(ctx, key).Result()
 		return err == nil && val != ""
 	}
 	_, ok := firingCache.Load(key)
@@ -380,7 +395,9 @@ func isFiring(r *model.Rule, deviceID uint) bool {
 func markFiring(r *model.Rule, deviceID uint) bool {
 	key := firingKey(r.ID, deviceID)
 	if redisSilenceRDB != nil {
-		ok, err := redisSilenceRDB.SetNX(context.Background(), key, "1", 7*24*time.Hour).Result()
+		ctx, cancel := redisCtx()
+		defer cancel()
+		ok, err := redisSilenceRDB.SetNX(ctx, key, "1", 7*24*time.Hour).Result()
 		return err == nil && ok
 	}
 	_, loaded := firingCache.LoadOrStore(key, time.Now())
@@ -391,7 +408,9 @@ func markFiring(r *model.Rule, deviceID uint) bool {
 func clearFiring(r *model.Rule, deviceID uint) {
 	key := firingKey(r.ID, deviceID)
 	if redisSilenceRDB != nil {
-		redisSilenceRDB.Del(context.Background(), key)
+		ctx, cancel := redisCtx()
+		defer cancel()
+		redisSilenceRDB.Del(ctx, key)
 		return
 	}
 	firingCache.Delete(key)
@@ -414,7 +433,10 @@ func fireAlarm(r *model.Rule, d *model.Device, act alarmAction, msg string, data
 		DeviceID: d.ID, DeviceName: d.Name,
 		Level: act.Level, Message: msg, Status: model.AlarmStatusFiring,
 	}
-	if err := repository.DB.Create(&alarm).Error; err != nil {
+	fireCtx, fireCancel := repository.Ctx()
+	err := repository.DB.WithContext(fireCtx).Create(&alarm).Error
+	fireCancel()
+	if err != nil {
 		slog.Error("save alarm failed", "err", err)
 		clearFiring(r, d.ID) // 写库失败回滚标记，允许下次重试
 		return
@@ -483,7 +505,8 @@ func inSilence(r *model.Rule, deviceID uint) bool {
 
 	// 多实例模式：Redis 检查
 	if redisSilenceRDB != nil {
-		ctx := context.Background()
+		ctx, cancel := redisCtx()
+		defer cancel()
 		val, err := redisSilenceRDB.Get(ctx, key).Result()
 		return err == nil && val != "" // key 存在说明在静默期内
 	}
@@ -504,7 +527,8 @@ func markFired(r *model.Rule, deviceID uint) {
 
 	// 多实例模式：Redis 设置带 TTL
 	if redisSilenceRDB != nil {
-		ctx := context.Background()
+		ctx, cancel := redisCtx()
+		defer cancel()
 		redisSilenceRDB.Set(ctx, key, "1", ttl)
 		return
 	}

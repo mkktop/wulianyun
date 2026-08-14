@@ -56,7 +56,9 @@ func CachedFindDevice(productKey, deviceName string) (*model.Device, error) {
 		return d, nil
 	}
 	var d model.Device
-	err := repository.DB.Where("product_key = ? AND name = ?", productKey, deviceName).First(&d).Error
+	ctx, cancel := repository.Ctx()
+	defer cancel()
+	err := repository.DB.WithContext(ctx).Where("product_key = ? AND name = ?", productKey, deviceName).First(&d).Error
 	if err != nil {
 		return nil, err
 	}

@@ -23,9 +23,11 @@ func GetShadow(deviceID uint) *model.DeviceShadow {
 	}
 	// 缓存未命中，从 DB 加载并初始化
 	var s model.DeviceShadow
-	if err := repository.DB.Where("device_id = ?", deviceID).First(&s).Error; err != nil {
+	ctx, cancel := repository.Ctx()
+	defer cancel()
+	if err := repository.DB.WithContext(ctx).Where("device_id = ?", deviceID).First(&s).Error; err != nil {
 		s = model.DeviceShadow{DeviceID: deviceID, Desired: []byte("{}"), Reported: []byte("{}")}
-		repository.DB.Create(&s)
+		repository.DB.WithContext(ctx).Create(&s)
 	}
 	return &s
 }
@@ -58,9 +60,11 @@ func UpdateShadowDesired(d *model.Device, desired map[string]interface{}) (*mode
 			merged[k] = v
 		}
 		data, _ := json.Marshal(merged)
-		repository.DB.Model(s).Updates(map[string]interface{}{
+		dbCtx, dbCancel := repository.Ctx()
+		repository.DB.WithContext(dbCtx).Model(s).Updates(map[string]interface{}{
 			"desired": data, "version": s.Version + 1,
 		})
+		dbCancel()
 		s.Desired = data
 		s.Version++
 		// retained 同步：无论设备在线与否都刷新，设备下次订阅必然拿到
@@ -146,7 +150,9 @@ func mergeShadowReported(d *model.Device, data map[string]interface{}) {
 			// 期望达成：刷新 retained（剩余期望或清除）
 			pushDesiredRetained(d, desired)
 		}
-		repository.DB.Model(s).Updates(updates)
+		dbCtx, dbCancel := repository.Ctx()
+		repository.DB.WithContext(dbCtx).Model(s).Updates(updates)
+		dbCancel()
 		return
 	}
 

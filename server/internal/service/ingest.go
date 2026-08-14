@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -50,7 +49,9 @@ func FindDevice(productKey, deviceName string) (*model.Device, error) {
 		return d, nil
 	}
 	var d model.Device
-	err := repository.DB.Where("product_key = ? AND name = ?", productKey, deviceName).First(&d).Error
+	ctx, cancel := repository.Ctx()
+	defer cancel()
+	err := repository.DB.WithContext(ctx).Where("product_key = ? AND name = ?", productKey, deviceName).First(&d).Error
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +90,9 @@ func FindDeviceForAuth(productKey, deviceName, secret string) (*model.Device, er
 			Name: deviceName, Secret: randSecret(),
 			Status: model.DeviceStatusInactive,
 		}
-		if err := repository.DB.Create(&nd).Error; err != nil {
+		regCtx, regCancel := repository.Ctx()
+		defer regCancel()
+		if err := repository.DB.WithContext(regCtx).Create(&nd).Error; err != nil {
 			return nil, errors.New("动态注册失败")
 		}
 		slog.Info("device auto-registered", "productId", productKey, "device", deviceName)
@@ -245,12 +248,14 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	if valid && len(mergeData) > 0 {
 		// 最新值缓存：按属性合并（Redis Lua 原子操作，避免竞态）
 		mergePayload, _ := json.Marshal(mergeData)
-		if err := mergeLatestScript.Run(context.Background(), repository.RDB,
+		mergeCtx, mergeCancel := repository.CtxWith(2 * time.Second)
+		if err := mergeLatestScript.Run(mergeCtx, repository.RDB,
 			[]string{latestKey(d.ID)},
 			string(mergePayload), fmt.Sprintf("%d", now.UnixMilli()),
 		).Err(); err != nil {
 			slog.Warn("merge latest cache failed", "device", d.Name, "err", err)
 		}
+		mergeCancel()
 
 		// 实时推送：设备归属者 + 其一级父账号（一级实时看二级设备曲线）
 		telemetryMsg := map[string]interface{}{"ts": now.UnixMilli(), "data": mergeData}
@@ -310,8 +315,11 @@ func HandleDeviceStatus(clientID string, online bool, evtTs int64) {
 	if evtTs > 0 {
 		var lastChange int64
 		var fresh model.Device
-		if err := repository.DB.Select("last_online_at", "last_offline_at").
-			Where("id = ?", d.ID).First(&fresh).Error; err == nil {
+		ctx, cancel := repository.Ctx()
+		err := repository.DB.WithContext(ctx).Select("last_online_at", "last_offline_at").
+			Where("id = ?", d.ID).First(&fresh).Error
+		cancel()
+		if err == nil {
 			if fresh.LastOnlineAt != nil && fresh.LastOnlineAt.UnixMilli() > lastChange {
 				lastChange = fresh.LastOnlineAt.UnixMilli()
 			}
@@ -344,8 +352,10 @@ func HandleDeviceStatus(clientID string, online bool, evtTs int64) {
 		return
 	}
 	updates["status"] = status
-	repository.DB.Model(&model.Device{}).Where("id = ?", d.ID).Updates(updates)
-	repository.DB.Create(&model.DeviceEvent{DeviceID: d.ID, Type: eventType, Detail: "clientid: " + clientID})
+	updCtx, updCancel := repository.Ctx()
+	repository.DB.WithContext(updCtx).Model(&model.Device{}).Where("id = ?", d.ID).Updates(updates)
+	repository.DB.WithContext(updCtx).Create(&model.DeviceEvent{DeviceID: d.ID, Type: eventType, Detail: "clientid: " + clientID})
+	updCancel()
 
 	// 上线时补发影子期望值 + 自动恢复该设备的离线告警（#9 上线分支）
 	if online {
@@ -402,14 +412,18 @@ func QueueStatus(clientID string, online bool, evtTs int64) {
 
 // GetLatest 读取设备最新遥测（Redis 缓存优先，回退数据库）
 func GetLatest(deviceID uint) map[string]interface{} {
-	if b, err := repository.RDB.Get(context.Background(), latestKey(deviceID)).Bytes(); err == nil {
+	latestCtx, latestCancel := repository.CtxWith(2 * time.Second)
+	defer latestCancel()
+	if b, err := repository.RDB.Get(latestCtx, latestKey(deviceID)).Bytes(); err == nil {
 		var m map[string]interface{}
 		if json.Unmarshal(b, &m) == nil {
 			return m
 		}
 	}
 	var t model.Telemetry
-	if err := repository.DB.Where("device_id = ?", deviceID).Order("ts desc").First(&t).Error; err != nil {
+	ctx, cancel := repository.Ctx()
+	defer cancel()
+	if err := repository.DB.WithContext(ctx).Where("device_id = ?", deviceID).Order("ts desc").First(&t).Error; err != nil {
 		return nil
 	}
 	var data map[string]interface{}
@@ -437,7 +451,9 @@ func HandleDeviceReply(topic string, payload []byte) {
 	}
 
 	now := time.Now()
-	result := repository.DB.Model(&model.CommandRequest{}).
+	replyCtx, replyCancel := repository.Ctx()
+	defer replyCancel()
+	result := repository.DB.WithContext(replyCtx).Model(&model.CommandRequest{}).
 		Where("message_id = ? AND status = ?", reply.MessageID, "pending").
 		Updates(map[string]interface{}{
 			"status":   "acked",

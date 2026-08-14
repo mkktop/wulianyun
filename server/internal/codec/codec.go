@@ -32,9 +32,13 @@ const (
 	maxInputLen  = 64 << 10 // 解码输入上限 64KB（防 16× 装箱放大 OOM）
 )
 
-func getProgram(productID uint, script string) (*goja.Program, error) {
+func scriptHash(script string) string {
 	h := sha256.Sum256([]byte(script))
-	hash := hex.EncodeToString(h[:8])
+	return hex.EncodeToString(h[:8])
+}
+
+func getProgram(productID uint, script string) (*goja.Program, error) {
+	hash := scriptHash(script)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -49,18 +53,54 @@ func getProgram(productID uint, script string) (*goja.Program, error) {
 	return prog, nil
 }
 
-func newVM(productID uint, script string) (*goja.Runtime, error) {
+// ---- VM 池 ----
+//
+// goja.Runtime 构造 + 顶层代码执行是透传产品解析热路径的主要开销（典型 50-200µs +
+// 数十 KB 分配/次）。sync.Pool 复用同脚本哈希的 VM，把每次执行降为一次函数调用：
+//   - 复用校验脚本哈希：脚本变更后旧 VM 直接废弃；
+//   - 执行出错/超时（Interrupt）后 VM 状态不可信，一律丢弃不归还；
+//   - 复用次数上限：防恶意/劣质脚本借全局变量跨调用累积内存（有界放大）。
+// sync.Pool 取出后独占，无并发问题（goja Runtime 本身非线程安全）。
+const maxVMReuse = 2048
+
+type pooledVM struct {
+	vm   *goja.Runtime
+	hash string
+	uses int
+}
+
+var vmPool sync.Pool
+
+// acquireVM 取一个可执行脚本的 VM（池命中或新建）
+func acquireVM(productID uint, script string) (*pooledVM, error) {
+	hash := scriptHash(script)
+	if v, _ := vmPool.Get().(*pooledVM); v != nil && v.hash == hash && v.uses < maxVMReuse {
+		return v, nil
+	}
 	prog, err := getProgram(productID, script)
 	if err != nil {
 		return nil, err
 	}
 	vm := goja.New()
+	// 顶层代码同样纳入超时防护：脚本顶层写死循环会永久挂起调用方（TCP 读循环/下行协程）
 	timer := time.AfterFunc(execTimeout, func() { vm.Interrupt("执行超时") })
 	defer timer.Stop()
 	if _, err := vm.RunProgram(prog); err != nil {
 		return nil, fmt.Errorf("脚本执行失败: %w", err)
 	}
-	return vm, nil
+	return &pooledVM{vm: vm, hash: hash}, nil
+}
+
+// releaseVM 归还 VM；tainted（执行出错/被 Interrupt）时不归还
+func releaseVM(v *pooledVM, tainted bool) {
+	if v == nil || tainted {
+		return
+	}
+	v.uses++
+	if v.uses >= maxVMReuse {
+		return // 复用次数用尽，换新（防全局状态累积）
+	}
+	vmPool.Put(v)
 }
 
 // Validate 编译校验脚本（SaveCodec 保存前调用，坏脚本拒绝落库）。
@@ -93,17 +133,19 @@ func Decode(productID uint, script string, data []byte) (out map[string]interfac
 	if len(data) > maxInputLen {
 		return nil, fmt.Errorf("报文过大（上限 %dKB）", maxInputLen>>10)
 	}
-	vm, err := newVM(productID, script)
+	pv, err := acquireVM(productID, script)
 	if err != nil {
 		return nil, err
 	}
-	fn, ok := goja.AssertFunction(vm.Get("decode"))
+	fn, ok := goja.AssertFunction(pv.vm.Get("decode"))
 	if !ok {
+		releaseVM(pv, false)
 		return nil, fmt.Errorf("脚本缺少 decode 函数")
 	}
-	timer := time.AfterFunc(execTimeout, func() { vm.Interrupt("执行超时") })
-	defer timer.Stop()
-	res, err := fn(goja.Undefined(), vm.ToValue(bytesToJSArr(data)))
+	timer := time.AfterFunc(execTimeout, func() { pv.vm.Interrupt("执行超时") })
+	res, err := fn(goja.Undefined(), pv.vm.ToValue(bytesToJSArr(data)))
+	timer.Stop()
+	releaseVM(pv, err != nil) // 出错/超时后 VM 状态不可信，丢弃
 	if err != nil {
 		return nil, fmt.Errorf("decode 调用失败: %w", err)
 	}
@@ -160,17 +202,19 @@ func Encode(productID uint, script string, params map[string]interface{}) (out [
 			out, ok, err = nil, false, fmt.Errorf("encode 脚本异常: %v", r)
 		}
 	}()
-	vm, err := newVM(productID, script)
+	pv, err := acquireVM(productID, script)
 	if err != nil {
 		return nil, false, err
 	}
-	fn, ok := goja.AssertFunction(vm.Get("encode"))
+	fn, ok := goja.AssertFunction(pv.vm.Get("encode"))
 	if !ok {
+		releaseVM(pv, false)
 		return nil, false, nil
 	}
-	timer := time.AfterFunc(execTimeout, func() { vm.Interrupt("执行超时") })
-	defer timer.Stop()
-	res, err := fn(goja.Undefined(), vm.ToValue(params))
+	timer := time.AfterFunc(execTimeout, func() { pv.vm.Interrupt("执行超时") })
+	res, err := fn(goja.Undefined(), pv.vm.ToValue(params))
+	timer.Stop()
+	releaseVM(pv, err != nil)
 	if err != nil {
 		return nil, false, fmt.Errorf("encode 调用失败: %w", err)
 	}

@@ -66,7 +66,10 @@ func (b *TelemetryBuffer) flush() {
 	b.items = make([]model.Telemetry, 0, b.maxBatch)
 	b.mu.Unlock()
 
-	if err := repository.DB.Create(&batch).Error; err != nil {
+	fctx, fcancel := repository.CtxWith(10 * time.Second) // 批量 INSERT 给足时长
+	err := repository.DB.WithContext(fctx).Create(&batch).Error
+	fcancel()
+	if err != nil {
 		slog.Error("batch telemetry flush failed", "count", len(batch), "error", err)
 		// 整批放回队首重试（下次 flush 再试）；超出缓冲上限时丢弃最旧部分，防止内存膨胀
 		b.mu.Lock()

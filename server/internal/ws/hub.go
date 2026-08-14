@@ -265,11 +265,14 @@ func (h *Hub) push(userID uint, onlyDevice *uint, msg OutMsg) {
 	data, _ := json.Marshal(msg)
 	// 1. 本实例直接推送
 	h.localPush(userID, onlyDevice, data)
-	// 2. 通过 Redis Pub/Sub 广播给其他实例（带实例 ID，接收端跳过自身回声）
+	// 2. 通过 Redis Pub/Sub 广播给其他实例（带实例 ID，接收端跳过自身回声）；
+	// 2s 超时防 Redis 挂起阻塞遥测 worker
 	if RedisPubSub != nil {
 		bm := wsBroadcastMsg{InstanceID: instanceID, UserID: userID, OnlyDevice: onlyDevice, Msg: data}
 		bmData, _ := json.Marshal(bm)
-		_ = RedisPubSub.Publish(context.Background(), wsChannel, bmData)
+		pubCtx, pubCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = RedisPubSub.Publish(pubCtx, wsChannel, bmData)
+		pubCancel()
 	}
 }
 

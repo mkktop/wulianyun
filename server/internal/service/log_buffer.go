@@ -70,8 +70,10 @@ func (b *logBuffer) flush() {
 	b.mu.Unlock()
 
 	cap := b.maxBatch * logBufferedFactor
+	flushCtx, flushCancel := repository.CtxWith(10 * time.Second) // 批量 INSERT 给足时长
+	defer flushCancel()
 	if len(traces) > 0 {
-		if err := repository.DB.CreateInBatches(traces, b.maxBatch).Error; err != nil {
+		if err := repository.DB.WithContext(flushCtx).CreateInBatches(traces, b.maxBatch).Error; err != nil {
 			slog.Error("batch trace flush failed", "count", len(traces), "error", err)
 			b.mu.Lock()
 			b.traces = append(traces, b.traces...)
@@ -82,7 +84,7 @@ func (b *logBuffer) flush() {
 		}
 	}
 	if len(logs) > 0 {
-		if err := repository.DB.CreateInBatches(logs, b.maxBatch).Error; err != nil {
+		if err := repository.DB.WithContext(flushCtx).CreateInBatches(logs, b.maxBatch).Error; err != nil {
 			slog.Error("batch device-log flush failed", "count", len(logs), "error", err)
 			b.mu.Lock()
 			b.logs = append(logs, b.logs...)

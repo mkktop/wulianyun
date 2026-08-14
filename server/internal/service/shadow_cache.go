@@ -47,7 +47,9 @@ func getShadowEntry(deviceID uint) *shadowCacheEntry {
 	}
 	// 从DB加载
 	var s model.DeviceShadow
-	if err := repository.DB.Where("device_id = ?", deviceID).First(&s).Error; err != nil {
+	ctx, cancel := repository.Ctx()
+	defer cancel()
+	if err := repository.DB.WithContext(ctx).Where("device_id = ?", deviceID).First(&s).Error; err != nil {
 		return nil
 	}
 	entry := &shadowCacheEntry{shadow: &s}
@@ -95,7 +97,10 @@ func shadowFlushAll() {
 		entry := value.(*shadowCacheEntry)
 		entry.mu.Lock()
 		if entry.dirty {
-			if err := repository.DB.Save(entry.shadow).Error; err != nil {
+			ctx, cancel := repository.CtxWith(10 * time.Second) // 批量落库给足时长
+			err := repository.DB.WithContext(ctx).Save(entry.shadow).Error
+			cancel()
+			if err != nil {
 				slog.Error("shadow flush failed", "deviceID", key, "error", err)
 			} else {
 				entry.dirty = false
