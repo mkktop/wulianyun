@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"runtime"
@@ -639,7 +640,11 @@ func ListAdminUsers(c *gin.Context) {
 func CreateAdminUser(c *gin.Context) {
 	var req adminUserCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, 400, "用户名至少3位，密码至少6位")
+		Fail(c, 400, "用户名至少3位，密码至少8位")
+		return
+	}
+	if len(req.Password) < minNewPassword {
+		Fail(c, 400, fmt.Sprintf("密码至少%d位", minNewPassword))
 		return
 	}
 	var cnt int64
@@ -656,7 +661,7 @@ func CreateAdminUser(c *gin.Context) {
 	if perm != model.AccountPermissionView {
 		perm = model.AccountPermissionOperate
 	}
-	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
 	u := model.User{
 		Username: req.Username, PasswordHash: string(hash),
 		Nickname: req.Nickname, Role: role, Status: model.AccountStatusActive,
@@ -698,12 +703,14 @@ func UpdateAdminUser(c *gin.Context) {
 		updates["nickname"] = *req.Nickname
 	}
 	if req.Password != nil {
-		if len(*req.Password) < 6 || len(*req.Password) > 64 {
-			Fail(c, 400, "密码长度 6-64 位")
+		if len(*req.Password) < minNewPassword || len(*req.Password) > 64 {
+			Fail(c, 400, fmt.Sprintf("密码长度 %d-64 位", minNewPassword))
 			return
 		}
-		hash, _ := bcrypt.GenerateFromPassword([]byte(*req.Password), bcrypt.DefaultCost)
+		hash, _ := bcrypt.GenerateFromPassword([]byte(*req.Password), bcryptCost)
 		updates["password_hash"] = string(hash)
+		// 版本 +1：被重置密码的账号现有 token 立即失效
+		updates["password_version"] = u.PasswordVersion + 1
 	}
 	if req.Role != nil {
 		if *req.Role != "admin" && *req.Role != "user" {

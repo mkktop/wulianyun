@@ -127,7 +127,7 @@ const createFormRef = ref<FormInstance>()
 const createForm = reactive({ username: '', nickname: '', password: '', permission: 'operate' })
 const createRules: FormRules = {
   username: [{ required: true, min: 3, max: 32, message: '用户名 3-32 位', trigger: 'blur' }],
-  password: [{ required: true, min: 6, max: 64, message: '密码至少 6 位', trigger: 'blur' }],
+  password: [{ required: true, min: 8, max: 64, message: '密码至少 8 位', trigger: 'blur' }],
 }
 function openCreate() {
   createForm.username = ''

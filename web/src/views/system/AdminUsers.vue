@@ -221,7 +221,7 @@ async function doEdit() {
 async function resetPwd(row: AdminUser) {
   const { value } = await ElMessageBox.prompt(`为用户 ${row.username} 设置新密码`, '重置密码', {
     inputType: 'password', inputPlaceholder: '新密码（≥6位）',
-    inputValidator: (v: string) => (v && v.length >= 6 ? true : '密码至少 6 位'),
+    inputValidator: (v: string) => (v && v.length >= 8 ? true : '密码至少 8 位'),
   })
   await api.admin.users.update(row.id, { password: value })
   ElMessage.success('密码已重置')

@@ -47,7 +47,8 @@ func DeviceHistory(c *gin.Context) {
 	}
 	limit := 2000
 	if v := c.Query("limit"); v != "" {
-		if n := atoi(v); n > 0 && n <= 50000 {
+		// 上限 1 万：每行都要 json.Unmarshal 进内存，5 万行大 payload 单请求即可占数十 MB
+		if n := atoi(v); n > 0 && n <= 10000 {
 			limit = n
 		}
 	}
@@ -180,18 +181,21 @@ func WSHandler(c *gin.Context) {
 	ws.H.Serve(c.Writer, c.Request)
 }
 
-// ValidateWSToken WS 首帧 token 校验：解析 JWT 并回查账号状态（禁用/删除即时失效）
+// ValidateWSToken WS 首帧 token 校验：解析 JWT 并回查账号状态（禁用/删除/改密即时失效）
 func ValidateWSToken(token string) (uint, error) {
 	claims, err := ParseToken(token)
 	if err != nil {
 		return 0, err
 	}
 	var u model.User
-	if err := repository.DB.Select("id, status").First(&u, claims.UserID).Error; err != nil {
+	if err := repository.DB.Select("id, status, password_version").First(&u, claims.UserID).Error; err != nil {
 		return 0, fmt.Errorf("账号不存在")
 	}
 	if u.Status == model.AccountStatusDisabled {
 		return 0, fmt.Errorf("账号已禁用")
+	}
+	if claims.PwdVer != u.PasswordVersion {
+		return 0, fmt.Errorf("凭证已失效")
 	}
 	return u.ID, nil
 }

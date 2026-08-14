@@ -18,61 +18,66 @@
 
 ## 二、签名鉴权
 
-每个请求携带三个签名头：
+每个请求携带四个签名头：
 
 | 请求头 | 取值 |
 |---|---|
 | `X-App-Key` | 应用 AppKey |
 | `X-Timestamp` | Unix **秒级**时间戳（±5 分钟有效） |
+| `X-Nonce` | **一次性随机串**（8-64 字符，建议 UUID 或 16+ 位 hex；同一 AppKey 在时间窗口内不可重复） |
 | `X-Sign` | `hex(HMAC-SHA256(AppSecret, 待签名串))` |
 
 ### 签名计算
 
-待签名串覆盖 **Method + PathAndQuery + BodyHash**，防止捕获的签名被改写为其他请求：
+待签名串覆盖 **Method + PathAndQuery + BodyHash + Nonce**，既防止捕获的签名被改写为其他请求，也防止原样重放（nonce 服务端去重，TTL 覆盖时间戳窗口）：
 
 ```text
 BodyHash   = hex(SHA256(请求体))                      （GET 无请求体时为空串的哈希）
-待签名串    = Method + "\n" + PathAndQuery + "\n" + BodyHash + "\n" + AppKey + "\n" + Timestamp
+待签名串    = Method + "\n" + PathAndQuery + "\n" + BodyHash + "\n" + AppKey + "\n" + Timestamp + "\n" + Nonce
 PathAndQuery = 请求路径（含 query，如 /openapi/v1/devices/3/latest）
 签名        = hex(HMAC-SHA256(AppSecret, 待签名串))
 ```
 
-示例：`GET /openapi/v1/devices/3/latest?size=10`、`appKey=ak3f8a1c...`、`ts=1785712345`：
+示例：`GET /openapi/v1/devices/3/latest?size=10`、`appKey=ak3f8a1c...`、`ts=1785712345`、`nonce=n-8f3a2b1c9d7e4f6a`：
 
 ```text
-待签名串 = GET\n/openapi/v1/devices/3/latest?size=10\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nak3f8a1c...\n1785712345
+待签名串 = GET\n/openapi/v1/devices/3/latest?size=10\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nak3f8a1c...\n1785712345\nn-8f3a2b1c9d7e4f6a
 ```
 
 ### 校验流程
 
-1. 缺任一签名头 → 401
+1. 缺任一签名头（含 X-Nonce）或 nonce 格式非法 → 401
 2. 时间戳超出 ±5 分钟 → 401
 3. AppKey 不存在或 `enabled=false` → 401
 4. 签名不匹配（常量时间比较）→ 401
+5. nonce 已使用（重放）→ 401
 
 ### 示例（Node.js）
 
 ```js
 const crypto = require('crypto')
 
-// 待签名串 = Method\nPathAndQuery\nBodyHash\nAppKey\nTimestamp
-function sign(method, pathAndQuery, body, appKey, appSecret, ts) {
+// 待签名串 = Method\nPathAndQuery\nBodyHash\nAppKey\nTimestamp\nNonce
+function sign(method, pathAndQuery, body, appKey, appSecret, ts, nonce) {
   const bodyHash = crypto.createHash('sha256').update(body).digest('hex')
   const mac = crypto.createHmac('sha256', appSecret)
-  mac.update(`${method}\n${pathAndQuery}\n${bodyHash}\n${appKey}\n${ts}`)
+  mac.update(`${method}\n${pathAndQuery}\n${bodyHash}\n${appKey}\n${ts}\n${nonce}`)
   return mac.digest('hex')
 }
 
 const appKey = 'ak3f8a1c...'
 const appSecret = 'c9d2f1e8...'
 const ts = Math.floor(Date.now() / 1000)
+// 每个请求生成一次性随机串（UUID / 随机 hex 均可），绝不复用
+const nonce = crypto.randomBytes(16).toString('hex')
 const path = '/openapi/v1/devices'
 
 const res = await fetch(`http://<平台地址>${path}`, {
   headers: {
     'X-App-Key': appKey,
     'X-Timestamp': String(ts),
-    'X-Sign': sign('GET', path, '', appKey, appSecret, ts),
+    'X-Nonce': nonce,
+    'X-Sign': sign('GET', path, '', appKey, appSecret, ts, nonce),
   },
 })
 ```
@@ -82,24 +87,25 @@ const res = await fetch(`http://<平台地址>${path}`, {
 ### 示例（Python）
 
 ```python
-import time, hmac, hashlib, requests
+import time, hmac, hashlib, uuid, requests
 
 app_key = "ak3f8a1c..."
 app_secret = "c9d2f1e8..."
 ts = str(int(time.time()))
+nonce = uuid.uuid4().hex  # 每个请求生成，绝不复用
 path = "/openapi/v1/devices"
 body_hash = hashlib.sha256(b"").hexdigest()
-raw = f"GET\n{path}\n{body_hash}\n{app_key}\n{ts}"
+raw = f"GET\n{path}\n{body_hash}\n{app_key}\n{ts}\n{nonce}"
 sign = hmac.new(app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
 
 r = requests.get(
     "http://<平台地址>" + path,
-    headers={"X-App-Key": app_key, "X-Timestamp": ts, "X-Sign": sign},
+    headers={"X-App-Key": app_key, "X-Timestamp": ts, "X-Nonce": nonce, "X-Sign": sign},
 )
 print(r.json())
 ```
 
-> 签名覆盖 **Method + PathAndQuery + BodyHash + AppKey + Timestamp**，捕获的签名无法被改写为其他请求（不同 method/path/body 会得到不同签名）。同一请求在 ±5 分钟时间窗口内可被原样重放，当前无 nonce 防重放机制。
+> 签名覆盖 **Method + PathAndQuery + BodyHash + AppKey + Timestamp + Nonce**：捕获的签名无法被改写为其他请求（不同 method/path/body/nonce 会得到不同签名），也无法原样重放（nonce 服务端去重，重复即 401）。
 
 ## 三、端点列表
 
@@ -110,7 +116,7 @@ Base path：`/openapi/v1`（**不带** `/api/v1` 前缀）。各端点的完整�
 | GET | `/openapi/v1/devices` | 分页设备列表；query：`productId`（产品数字 ID）、`keyword`、`status`、`groupId`、`page`、`size`（上限 100） |
 | GET | `/openapi/v1/devices/:id` | 设备详情（`:id` 为设备数字 ID） |
 | GET | `/openapi/v1/devices/:id/latest` | 设备最新遥测 |
-| GET | `/openapi/v1/devices/:id/history` | 历史遥测；query：`start`（毫秒）、`end`（毫秒）、`limit`（默认 2000，上限 **50000**，无分页） |
+| GET | `/openapi/v1/devices/:id/history` | 历史遥测；query：`start`（毫秒）、`end`（毫秒）、`limit`（默认 2000，上限 **10000**，无分页） |
 | GET | `/openapi/v1/devices/:id/shadow` | 设备影子 |
 | POST | `/openapi/v1/devices/:id/property` | 属性设置：`{"params": {...}, "expireSec": 0}` |
 | POST | `/openapi/v1/devices/:id/command` | 透传命令：body 为**任意原始 JSON**（不生成 messageId，无应答状态机） |
@@ -123,6 +129,7 @@ Base path：`/openapi/v1`（**不带** `/api/v1` 前缀）。各端点的完整�
 POST /openapi/v1/devices/3/property
 X-App-Key: ak3f8a1c...
 X-Timestamp: 1785712345
+X-Nonce: n-8f3a2b1c9d7e4f6a
 X-Sign: ...
 
 { "params": { "switch": 1 }, "expireSec": 0 }
@@ -146,6 +153,7 @@ X-Sign: ...
 POST /openapi/v1/devices/3/command
 X-App-Key: ak3f8a1c...
 X-Timestamp: 1785712345
+X-Nonce: n-2c9d8e7f6a5b4c3d
 X-Sign: ...
 
 { "action": "reboot" }
@@ -160,14 +168,15 @@ X-Sign: ...
 
 ## 五、注意事项
 
-- **CORS**：`AllowHeaders` 不含 `X-App-Key/X-Timestamp/X-Sign`，浏览器跨域直接调用会被预检拒绝；服务端 / curl / 设备端不受影响
-- 端点不支持 `?token=` 方式，仅接受三个签名头
+- **CORS**：`AllowHeaders` 不含 `X-App-Key/X-Timestamp/X-Nonce/X-Sign`，浏览器跨域直接调用会被预检拒绝；服务端 / curl / 设备端不受影响
+- 端点不支持 `?token=` 方式，仅接受四个签名头
+- **nonce 必须每个请求新生成**（UUID / 随机 hex），复用会得到 `401 重复的请求`；时间戳窗口 ±5 分钟之外同样拒绝
 - 设备 ID 为数据库主键（uint），非 DeviceName
 
 ## 六、错误码
 
 | HTTP | code | 触发条件 |
 |---|---|---|
-| 401 | 401 | 缺少签名头 / 时间戳无效或过期 / AppKey 无效或已禁用 / 签名错误 |
+| 401 | 401 | 缺少签名头（含 X-Nonce）/ nonce 格式非法或重复（重放）/ 时间戳无效或过期 / AppKey 无效或已禁用 / 签名错误 |
 | 404 | 404 | 设备不存在（或不属于该应用） |
 | 400 | 400 | 属性参数非法 / 设备不在线 / 命令非合法 JSON |

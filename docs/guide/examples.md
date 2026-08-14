@@ -99,17 +99,19 @@ const crypto = require('crypto')
 const appKey = 'ak3f8a1c...'
 const appSecret = 'c9d2f1e8...'
 const ts = Math.floor(Date.now() / 1000)
+const nonce = crypto.randomBytes(16).toString('hex') // 每个请求新生成，绝不复用
 const method = 'GET'
 const path = '/openapi/v1/devices/3/latest'
 const bodyHash = crypto.createHash('sha256').update('').digest('hex')
-// 待签名串 = Method\nPathAndQuery\nBodyHash\nAppKey\nTimestamp
+// 待签名串 = Method\nPathAndQuery\nBodyHash\nAppKey\nTimestamp\nNonce
 const sign = crypto.createHmac('sha256', appSecret)
-  .update(`${method}\n${path}\n${bodyHash}\n${appKey}\n${ts}`).digest('hex')
+  .update(`${method}\n${path}\n${bodyHash}\n${appKey}\n${ts}\n${nonce}`).digest('hex')
 
 const res = await fetch(`http://<平台地址>${path}`, {
   headers: {
     'X-App-Key': appKey,
     'X-Timestamp': String(ts),
+    'X-Nonce': nonce,
     'X-Sign': sign,
   },
 })
@@ -123,9 +125,10 @@ console.log(await res.json())
 ```js
 const body = JSON.stringify({ params: { switch: 1 }, expireSec: 0 })
 const path = '/openapi/v1/devices/3/property'
+const nonce = crypto.randomBytes(16).toString('hex') // 每个请求新生成
 const bodyHash = crypto.createHash('sha256').update(body).digest('hex')
 const sign = crypto.createHmac('sha256', appSecret)
-  .update(`POST\n${path}\n${bodyHash}\n${appKey}\n${ts}`).digest('hex')
+  .update(`POST\n${path}\n${bodyHash}\n${appKey}\n${ts}\n${nonce}`).digest('hex')
 
 const res = await fetch(`http://<平台地址>${path}`, {
   method: 'POST',
@@ -133,6 +136,7 @@ const res = await fetch(`http://<平台地址>${path}`, {
     'Content-Type': 'application/json',
     'X-App-Key': appKey,
     'X-Timestamp': String(ts),
+    'X-Nonce': nonce,
     'X-Sign': sign,
   },
   body,
@@ -142,19 +146,20 @@ const res = await fetch(`http://<平台地址>${path}`, {
 ### Python
 
 ```python
-import time, hmac, hashlib, requests
+import time, hmac, hashlib, uuid, requests
 
 app_key = "ak3f8a1c..."
 app_secret = "c9d2f1e8..."
 ts = str(int(time.time()))
+nonce = uuid.uuid4().hex  # 每个请求新生成，绝不复用
 path = "/openapi/v1/devices/3/latest"
 body_hash = hashlib.sha256(b"").hexdigest()
-raw = f"GET\n{path}\n{body_hash}\n{app_key}\n{ts}"
+raw = f"GET\n{path}\n{body_hash}\n{app_key}\n{ts}\n{nonce}"
 sign = hmac.new(app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
 
 r = requests.get(
     "http://<平台地址>" + path,
-    headers={"X-App-Key": app_key, "X-Timestamp": ts, "X-Sign": sign},
+    headers={"X-App-Key": app_key, "X-Timestamp": ts, "X-Nonce": nonce, "X-Sign": sign},
 )
 print(r.json())
 ```
@@ -164,15 +169,16 @@ print(r.json())
 ```python
 body = b'{"params": {"switch": 1}, "expireSec": 0}'
 path = "/openapi/v1/devices/3/property"
+nonce = uuid.uuid4().hex  # 每个请求新生成
 body_hash = hashlib.sha256(body).hexdigest()
-raw = f"POST\n{path}\n{body_hash}\n{app_key}\n{ts}"
+raw = f"POST\n{path}\n{body_hash}\n{app_key}\n{ts}\n{nonce}"
 sign = hmac.new(app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
 
 r = requests.post(
     "http://<平台地址>" + path,
     data=body,
     headers={"Content-Type": "application/json",
-             "X-App-Key": app_key, "X-Timestamp": ts, "X-Sign": sign},
+             "X-App-Key": app_key, "X-Timestamp": ts, "X-Nonce": nonce, "X-Sign": sign},
 )
 print(r.json())
 ```

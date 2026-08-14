@@ -7,7 +7,7 @@
 ## 一、通用约定
 
 - **Base path**：`/openapi/v1`（不带 `/api/v1` 前缀）
-- **请求头**（每个请求必带）：`X-App-Key` / `X-Timestamp`（Unix 秒级，±5 分钟）/ `X-Sign`
+- **请求头**（每个请求必带）：`X-App-Key` / `X-Timestamp`（Unix 秒级，±5 分钟）/ `X-Nonce`（一次性随机串，8-64 字符，不可重复）/ `X-Sign`
 - **签名**：`hex(HMAC-SHA256(AppSecret, Method + "\n" + PathAndQuery + "\n" + hex(SHA256(Body)) + "\n" + AppKey + "\n" + Timestamp))`；POST 的 BodyHash 必须与实际发送字节一致
 - **标识**：路径 `:id` 与 query 中 `productId`/`groupId` 均为**数字 ID**；设备名/产品标识字符串只在设备三元组与 MQTT 中使用
 - **作用域**：请求以应用归属用户身份执行，只能访问其名下资源；越权访问统一返回 `404 设备不存在`
@@ -191,7 +191,7 @@ Content-Type: application/json
 ```text
 BodyHash     = hex(SHA256(请求体))            // GET 无请求体：空串哈希
 PathAndQuery = 请求路径含 query               // 如 /openapi/v1/devices?size=10
-待签名串      = Method + "\n" + PathAndQuery + "\n" + BodyHash + "\n" + AppKey + "\n" + Timestamp
+待签名串      = Method + "\n" + PathAndQuery + "\n" + BodyHash + "\n" + AppKey + "\n" + Timestamp + "\n" + Nonce
 X-Sign       = hex(HMAC-SHA256(AppSecret, 待签名串))
 ```
 

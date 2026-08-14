@@ -96,7 +96,8 @@ Content-Type: application/json
 |---|---|
 | `X-App-Key` | AppKey |
 | `X-Timestamp` | Unix 秒级（±5 分钟） |
-| `X-Sign` | `hex(HMAC-SHA256(AppSecret, Method\nPathAndQuery\nBodyHash\nAppKey\nTimestamp))` |
+| `X-Nonce` | 一次性随机串（8-64 字符，同一 AppKey 不可重复，防重放） |
+| `X-Sign` | `hex(HMAC-SHA256(AppSecret, Method\nPathAndQuery\nBodyHash\nAppKey\nTimestamp\nNonce))` |
 
 ## 四、统一响应信封
 

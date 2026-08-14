@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
@@ -20,9 +21,16 @@ type authReq struct {
 	Nickname string `json:"nickname"`
 }
 
+// bcryptCost 密码哈希成本（12 ≈ 单次 200-300ms，主流厂商标准；
+// 只影响新哈希，存量哈希仍可正常校验登录）
+const bcryptCost = 12
+
+// minNewPassword 新设/重置密码的最短长度（存量旧密码登录不受影响）
+const minNewPassword = 8
+
 // dummyPasswordHash 登录时序防枚举：用户不存在时也执行一次 bcrypt 比较（对照此固定哈希）
 var dummyPasswordHash = func() []byte {
-	h, _ := bcrypt.GenerateFromPassword([]byte("dummy-password-for-timing"), bcrypt.DefaultCost)
+	h, _ := bcrypt.GenerateFromPassword([]byte("dummy-password-for-timing"), bcryptCost)
 	return h
 }()
 
@@ -42,7 +50,11 @@ func Register(c *gin.Context) {
 	}
 	var req authReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Fail(c, 400, "用户名至少3位，密码至少6位")
+		Fail(c, 400, "用户名至少3位，密码至少8位")
+		return
+	}
+	if len(req.Password) < minNewPassword {
+		Fail(c, 400, "密码至少8位")
 		return
 	}
 	var cnt int64
@@ -51,7 +63,7 @@ func Register(c *gin.Context) {
 		Fail(c, 400, "用户名已存在")
 		return
 	}
-	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
 	user := model.User{Username: req.Username, PasswordHash: string(hash), Nickname: req.Nickname, Role: "user"}
 	if user.Nickname == "" {
 		user.Nickname = req.Username
@@ -97,7 +109,7 @@ func Login(c *gin.Context) {
 		Fail(c, 400, "账号已禁用")
 		return
 	}
-	token, err := GenToken(user.ID, user.Username, user.Role, user.ParentID)
+	token, err := GenToken(user.ID, user.Username, user.Role, user.ParentID, user.PasswordVersion)
 	if err != nil {
 		Fail(c, 500, "生成令牌失败")
 		return
@@ -134,6 +146,10 @@ func ChangePassword(c *gin.Context) {
 		Fail(c, 400, "原密码必填，新密码至少6位")
 		return
 	}
+	if len(req.NewPassword) < minNewPassword {
+		Fail(c, 400, fmt.Sprintf("新密码至少%d位", minNewPassword))
+		return
+	}
 	var user model.User
 	if err := repository.DB.First(&user, UID(c)).Error; err != nil {
 		Fail(c, 404, "用户不存在")
@@ -147,8 +163,12 @@ func ChangePassword(c *gin.Context) {
 		Fail(c, 400, "新密码不能与原密码相同")
 		return
 	}
-	hash, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-	if err := repository.DB.Model(&user).Update("password_hash", string(hash)).Error; err != nil {
+	hash, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcryptCost)
+	// 密码版本 +1：改密前签发的所有 token（含本会话）立即失效，需重新登录
+	if err := repository.DB.Model(&user).Updates(map[string]interface{}{
+		"password_hash":     string(hash),
+		"password_version":  user.PasswordVersion + 1,
+	}).Error; err != nil {
 		Fail(c, 500, "修改失败")
 		return
 	}
@@ -167,7 +187,7 @@ func EnsureAdmin() {
 			slog.Error("⚠ 使用默认管理员密码 admin123 创建超管账号——"+
 				"公网部署必须立即修改，或在配置中设置 admin_password / 环境变量后重启")
 		}
-		hash, _ := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
+		hash, _ := bcrypt.GenerateFromPassword([]byte(pwd), bcryptCost)
 		repository.DB.Create(&model.User{Username: "admin", PasswordHash: string(hash), Nickname: "管理员", Role: "admin"})
 	}
 }

@@ -380,7 +380,13 @@ function encode(obj) {
 |---|---|
 | `X-App-Key` | 应用 AppKey |
 | `X-Timestamp` | Unix 秒级时间戳（±5 分钟有效） |
-| `X-Sign` | `hex(HMAC-SHA256(AppSecret, AppKey + Timestamp))` |
+| `X-Nonce` | 一次性随机串（8-64 字符，同一 AppKey 不可重复，防重放） |
+| `X-Sign` | `hex(HMAC-SHA256(AppSecret, Method + "
+" + PathAndQuery + "
+" + hex(SHA256(Body)) + "
+" + AppKey + "
+" + Timestamp + "
+" + Nonce))` |
 
 **开放端点**（`/openapi/v1`）
 

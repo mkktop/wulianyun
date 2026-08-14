@@ -89,11 +89,13 @@
 
 | msg | 触发条件 |
 |---|---|
-| `缺少签名头 X-App-Key/X-Timestamp/X-Sign` | 三个签名头缺一 |
+| `缺少签名头 X-App-Key/X-Timestamp/X-Sign` | 签名头缺一 |
+| `X-Nonce 必填（8-64 位随机串，且不可重复）` | 缺少 nonce 或格式非法 |
 | `时间戳无效或已过期` | 与服务器时间差超过 ±5 分钟 |
 | `AppKey 无效或已禁用` | AppKey 不存在或应用被停用 |
 | `应用归属账号不存在` / `应用归属账号已禁用` | 应用归属用户被删除/禁用 |
-| `签名错误` | HMAC 不匹配（method/path/body/时间戳任一不一致） |
+| `签名错误` | HMAC 不匹配（method/path/body/时间戳/nonce 任一不一致） |
+| `重复的请求（nonce 已使用）` | 重放（同一 nonce 二次使用） |
 
 ## 七、HTTP 直传端点
 

@@ -108,7 +108,7 @@
           <el-input v-model="pwdForm.oldPassword" type="password" show-password placeholder="请输入原密码" />
         </el-form-item>
         <el-form-item label="新密码" prop="newPassword">
-          <el-input v-model="pwdForm.newPassword" type="password" show-password placeholder="至少 6 位" />
+          <el-input v-model="pwdForm.newPassword" type="password" show-password placeholder="至少 8 位" />
         </el-form-item>
         <el-form-item label="确认密码" prop="confirmPassword">
           <el-input v-model="pwdForm.confirmPassword" type="password" show-password placeholder="再次输入新密码" />
@@ -247,7 +247,7 @@ const pwdRules: FormRules = {
   oldPassword: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
   newPassword: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, max: 64, message: '密码长度 6-64 位', trigger: 'blur' }
+    { min: 8, max: 64, message: '密码长度 8-64 位', trigger: 'blur' }
   ],
   confirmPassword: [
     { required: true, message: '请再次输入新密码', trigger: 'blur' },
@@ -273,8 +273,16 @@ async function submitPassword() {
     pwdLoading.value = true
     try {
       await api.changePassword({ oldPassword: pwdForm.oldPassword, newPassword: pwdForm.newPassword })
-      ElMessage.success('密码修改成功')
       pwdVisible.value = false
+      // 服务端改密后旧 token 立即失效（password_version +1），直接回登录页重新登录
+      ElMessage.success('密码修改成功，请重新登录')
+      realtime.close()
+      localStorage.removeItem('token')
+      localStorage.removeItem('userId')
+      localStorage.removeItem('username')
+      localStorage.removeItem('tier')
+      localStorage.removeItem('perm')
+      router.push('/login')
     } catch {
       /* 错误已由 axios 拦截器提示 */
     } finally {

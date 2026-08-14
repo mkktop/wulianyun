@@ -35,7 +35,10 @@ type User struct {
 	ParentID     *uint     `gorm:"index" json:"parentId,omitempty"`          // 父账号 ID；nil=一级（独立主账号）；非空=二级
 	Status       string    `gorm:"size:16;default:active" json:"status"`     // active / disabled
 	Permission   string    `gorm:"size:16;default:operate" json:"permission"` // operate / view（二级账号权限级别）
-	CreatedAt    time.Time `json:"createdAt"`
+	// PasswordVersion 改密/重置密码时 +1；JWT claims 携带签发时的版本，
+	// 中间件比对不一致即 401——已签发 token 在改密后立即失效（防泄露 token 长期可用）
+	PasswordVersion int       `gorm:"default:0" json:"-"`
+	CreatedAt       time.Time `json:"createdAt"`
 }
 
 // ProductGrant 产品下放授权：一级把某个产品下放给某个二级账号使用。

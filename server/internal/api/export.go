@@ -100,8 +100,11 @@ func ExportDeviceHistory(c *gin.Context) {
 	}
 }
 
-// csvValue CSV 单元格：数值直写，字符串加引号转义
+// csvValue CSV 单元格：数值直写，字符串加引号转义。
+// 公式注入防护：以 = + - @ 或制表符/回车开头的单元格前置单引号，
+// 防止设备上报的文本值（攻击者可控）在 Excel/WPS 打开时被当公式执行（CSV 注入）
 func csvValue(v interface{}) string {
+	s := ""
 	switch val := v.(type) {
 	case float64:
 		return strconv.FormatFloat(val, 'f', -1, 64)
@@ -111,10 +114,14 @@ func csvValue(v interface{}) string {
 		}
 		return "0"
 	case string:
-		return `"` + strings.ReplaceAll(val, `"`, `""`) + `"`
+		s = val
 	case nil:
 		return ""
 	default:
-		return fmt.Sprintf("%v", val)
+		s = fmt.Sprintf("%v", val)
 	}
+	if s != "" && strings.ContainsAny(s[:1], "=+-@\t\r") {
+		s = "'" + s
+	}
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
