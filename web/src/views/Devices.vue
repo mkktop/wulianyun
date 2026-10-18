@@ -14,6 +14,9 @@
         <el-select v-model="groupId" placeholder="全部分组" clearable style="width: 150px" @change="load">
           <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="String(g.id)" />
         </el-select>
+        <el-select v-model="tag" placeholder="全部标签" clearable filterable allow-create style="width: 150px" @change="load">
+          <el-option v-for="t in allTags" :key="t" :label="t" :value="t" />
+        </el-select>
         <el-input v-model="keyword" placeholder="搜索设备名称" clearable style="width: 200px" @change="load">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
@@ -26,9 +29,31 @@
       </div>
     </div>
 
-    <el-table :data="list" v-loading="loading" stripe>
+    <!-- 批量操作条：勾选设备后出现 -->
+    <div v-if="selected.length" class="batch-bar">
+      <span>已选 <b>{{ selected.length }}</b> 台设备</span>
+      <el-button size="small" @click="batchOp('disable')">批量禁用</el-button>
+      <el-button size="small" @click="batchOp('enable')">批量启用</el-button>
+      <el-button size="small" @click="moveVisible = true">移动分组</el-button>
+      <el-button size="small" type="danger" plain @click="batchOp('delete')">批量删除</el-button>
+    </div>
+
+    <el-table :data="list" v-loading="loading" stripe @selection-change="onSelectionChange">
+      <el-table-column v-if="!viewOnly" type="selection" width="42" />
       <template #empty>
-        <el-empty description="暂无符合条件的设备" :image-size="80" />
+        <el-empty :image-size="80" :description="hasFilter ? '暂无符合条件的设备，试试清除筛选条件' : '还没有设备'">
+          <div v-if="!hasFilter && !viewOnly" class="empty-guide">
+            <template v-if="!products.length">
+              <p class="guide-tip">先创建产品，定义设备的接入协议与物模型</p>
+              <el-button type="primary" @click="$router.push('/console/products/new')">去创建产品</el-button>
+            </template>
+            <template v-else>
+              <p class="guide-tip">添加设备后，用三元组（ProductID / DeviceName / DeviceSecret）即可连接平台</p>
+              <el-button type="primary" @click="dialogVisible = true">添加设备</el-button>
+            </template>
+            <el-button @click="openDocs">查看接入文档</el-button>
+          </div>
+        </el-empty>
       </template>
       <el-table-column label="设备名称" min-width="140">
         <template #default="{ row }">
@@ -132,6 +157,17 @@
     </template>
   </el-dialog>
 
+  <!-- 批量移动分组 -->
+  <el-dialog v-model="moveVisible" title="移动到分组" width="400px">
+    <el-select v-model="moveTarget" placeholder="选择目标分组" style="width: 100%">
+      <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
+    </el-select>
+    <template #footer>
+      <el-button @click="moveVisible = false">取消</el-button>
+      <el-button type="primary" :loading="batching" @click="batchMove">移动</el-button>
+    </template>
+  </el-dialog>
+
   <!-- 分组管理 -->
   <el-dialog v-model="groupMgrVisible" title="分组管理" width="520px">
     <div class="group-add">
@@ -153,7 +189,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, type Device, type DeviceGroup, type Product, isViewOnly } from '../api'
@@ -173,7 +209,73 @@ const keyword = ref('')
 const status = ref('')
 const productId = ref((route.query.productId as string) || '')
 const groupId = ref('')
+const tag = ref('')
 const loading = ref(false)
+// 标签筛选候选：从当前页设备的标签聚合（库内标签全集无独立接口，先以可见数据为准）
+const allTags = computed(() => {
+  const s = new Set<string>()
+  for (const d of list.value) for (const t of parseTags(d.tags)) s.add(t)
+  return [...s].sort()
+})
+const hasFilter = computed(() => !!(keyword.value || status.value || productId.value || groupId.value || tag.value))
+
+// 批量操作
+const selected = ref<Device[]>([])
+const moveVisible = ref(false)
+const moveTarget = ref<number | null>(null)
+const batching = ref(false)
+
+function onSelectionChange(rows: Device[]) {
+  selected.value = rows
+}
+
+function openDocs() {
+  window.open('/developer/guide/mqtt.html', '_blank')
+}
+
+function batchResultTip(res: { success: number; skipped: number[]; failed: Record<number, string> }) {
+  const parts = [`成功 ${res.success} 台`]
+  if (res.skipped.length) parts.push(`跳过 ${res.skipped.length} 台（不存在或无权限）`)
+  if (Object.keys(res.failed).length) parts.push(`失败 ${Object.keys(res.failed).length} 台`)
+  ElMessage.success(parts.join('，'))
+}
+
+async function runBatch(action: 'disable' | 'enable' | 'delete' | 'moveGroup', groupIdVal?: number) {
+  batching.value = true
+  try {
+    const res = await api.batchUpdateDevices({
+      ids: selected.value.map((d) => d.id), action, groupId: groupIdVal
+    })
+    batchResultTip(res)
+    moveVisible.value = false
+    selected.value = []
+    load()
+  } finally {
+    batching.value = false
+  }
+}
+
+function batchOp(action: 'disable' | 'enable' | 'delete') {
+  const n = selected.value.length
+  if (action === 'delete') {
+    ElMessageBox.confirm(`确定删除选中的 ${n} 台设备？删除后其历史数据、影子与日志将一并清除`, '批量删除确认', { type: 'warning' })
+      .then(() => runBatch('delete')).catch(() => {})
+  } else {
+    ElMessageBox.confirm(
+      action === 'disable' ? `确定禁用选中的 ${n} 台设备？禁用后将无法接入平台` : `确定启用选中的 ${n} 台设备？`,
+      '批量操作确认', { type: 'warning' }
+    ).then(() => runBatch(action)).catch(() => {})
+  }
+}
+
+async function batchMove() {
+  if (!moveTarget.value) {
+    ElMessage.warning('请选择目标分组')
+    return
+  }
+  await runBatch('moveGroup', moveTarget.value)
+  moveTarget.value = null
+}
 const dialogVisible = ref(false)
 const saving = ref(false)
 const form = reactive<{ productId: number | null; name: string; remark: string; regCode: string }>({
@@ -255,7 +357,7 @@ async function load() {
   try {
     const res = await api.listDevices({
       page: page.value, size, keyword: keyword.value,
-      status: status.value, productId: productId.value, groupId: groupId.value
+      status: status.value, productId: productId.value, groupId: groupId.value, tag: tag.value
     })
     list.value = res.list
     total.value = res.total
@@ -342,7 +444,15 @@ onUnmounted(() => realtime.off(onMsg))
 
 <style scoped>
 .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; }
-.filters { display: flex; gap: 12px; }
+.filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.batch-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; margin-bottom: 12px;
+  background: #ecf5ff; border: 1px solid #d9ecff; border-radius: 6px;
+  color: #409EFF; font-size: 13px;
+}
+.empty-guide { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.guide-tip { color: #909399; font-size: 13px; margin: 0; }
 .pager { margin-top: 16px; justify-content: flex-end; }
 .tag-edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .group-add { display: flex; gap: 8px; margin-bottom: 12px; }

@@ -12,6 +12,14 @@
     </div>
 
     <el-table :data="list" v-loading="loading" stripe>
+      <template #empty>
+        <el-empty description="还没有规则" :image-size="80">
+          <div class="empty-guide">
+            <p class="guide-tip">为设备数据配置阈值告警、离线告警或数据转发</p>
+            <el-button type="primary" @click="openDialog()">新建规则</el-button>
+          </div>
+        </el-empty>
+      </template>
       <el-table-column prop="name" label="规则名称" min-width="130" />
       <el-table-column label="类型" width="100">
         <template #default="{ row }">
@@ -496,6 +504,8 @@ onMounted(async () => {
 <style scoped>
 .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; }
 .pager { margin-top: 16px; justify-content: flex-end; }
+.empty-guide { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.guide-tip { color: #909399; font-size: 13px; margin: 0; }
 
 /* 条件编辑器 */
 .cond-header { margin-bottom: 12px; }

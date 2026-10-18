@@ -116,10 +116,15 @@
             <div class="card-head">
               <span>历史曲线</span>
               <div class="curve-tools">
+                <el-tag v-if="aggMode" size="small" type="info" effect="plain" class="agg-tag">
+                  已按 {{ aggIntervalLabel }} 聚合（平均值）
+                </el-tag>
                 <el-radio-group v-model="range" size="small" @change="onRangeChange">
                   <el-radio-button :value="1">1小时</el-radio-button>
                   <el-radio-button :value="6">6小时</el-radio-button>
                   <el-radio-button :value="24">24小时</el-radio-button>
+                  <el-radio-button :value="168">7天</el-radio-button>
+                  <el-radio-button :value="720">30天</el-radio-button>
                 </el-radio-group>
                 <el-date-picker
                   v-model="customRange"
@@ -528,6 +533,25 @@ async function loadHistory() {
     start = customRange.value[0].getTime()
     end = customRange.value[1].getTime()
   }
+  // 超过 6 小时的范围改走聚合查询（服务端按时间桶求均值）：
+  // 原始点既超出前端可渲染量级，也顶到 1 万行上限；桶宽由服务端按范围自动取整
+  if (end - start > 6 * 3600 * 1000 && numericFields.value.length) {
+    const res = await api.deviceHistoryAgg(id, { start, end, fields: numericFields.value.join(','), agg: 'avg' })
+    aggMode.value = true
+    aggIntervalLabel.value = intervalLabel(res.intervalSeconds)
+    series.clear()
+    for (const p of res.points) {
+      for (const [k, v] of Object.entries(p.data)) {
+        if (typeof v !== 'number') continue
+        if (!series.has(k)) series.set(k, [])
+        series.get(k)!.push([p.ts, v])
+      }
+    }
+    await syncFields()
+    renderAll()
+    return
+  }
+  aggMode.value = false
   // 按时间范围估算数据条数（5s 上报周期），上限 10000（服务端同步限制）
   const points = await api.deviceHistory(id, { start, end, limit: Math.min(10000, Math.ceil((end - start) / 4000) + 200) })
   series.clear()
@@ -540,6 +564,20 @@ async function loadHistory() {
   }
   await syncFields()
   renderAll()
+}
+
+// 数值型物模型属性（聚合查询只能聚数值）
+const numericFields = computed(() =>
+  properties.value.filter((p) => ['int32', 'float', 'double'].includes(p.dataType)).map((p) => p.identifier))
+// 聚合模式下不再把实时原始点混进聚合序列（粒度不一致，拼接会出现锯齿跳变）
+const aggMode = ref(false)
+const aggIntervalLabel = ref('')
+
+function intervalLabel(sec: number): string {
+  if (sec < 60) return `${sec}秒`
+  if (sec < 3600) return `${sec / 60}分钟`
+  if (sec < 86400) return `${sec / 3600}小时`
+  return `${sec / 86400}天`
 }
 
 // 字段集合变化时同步图表容器（新增/移除变量）
@@ -639,6 +677,7 @@ function onMsg(msg: any) {
   if (msg.type === 'telemetry' && msg.deviceId === id) {
     latest.value = { ...latest.value, ...msg.payload.data }
     lastTs.value = msg.payload.ts
+    if (aggMode.value) return // 聚合视图不混入原始点（见 loadHistory 注释）
     let hasNew = false
     for (const [k, v] of Object.entries(msg.payload.data)) {
       if (typeof v !== 'number') continue
@@ -753,6 +792,7 @@ onUnmounted(() => {
 .sub { color: #999; font-size: 13px; margin-top: 6px; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .curve-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.agg-tag { flex-shrink: 0; }
 .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .metric { background: #f7f9fc; border-radius: 8px; padding: 12px 16px; }
 .metric-name { color: #999; font-size: 13px; }

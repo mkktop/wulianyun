@@ -121,7 +121,7 @@ cd deploy/dist && bash build.sh amd64     # 产 kk-iot-<VERSION>-amd64.tar.gz + 
 
 build.sh 流程：go 交叉编译 server（`CGO_ENABLED=0`）→ web/docs `npm build`（docs 产物并入 web/dist/developer）→ 薄单阶段 `Dockerfile.server`/`Dockerfile.web` 打 `kk-iot/server`、`kk-iot/web` → 连同 `timescale/timescaledb:2.17.2-pg16` / `redis:7-alpine` / `emqx/emqx:5.8`（**固定 tag，不用 latest**）`docker save` → tar.gz + sha256。Go 多源探测：`$GO` → `.tools/go` → `go`；arm64 走 QEMU（本期只实测 amd64）。
 
-**版本与发布：** 仓库根 `VERSION`（纯 semver，当前 `1.0.4`）是唯一版本源——build.sh 读取、CI 校验 tag==VERSION（不一致 CI fail）。`git tag v<VERSION>` 推送 → [`.github/workflows/build-release.yml`](.github/workflows/build-release.yml) 构建并 `gh release create`，Release 说明由 `RELEASE_NOTES.md`（`@VERSION@` 占位符）渲染（也作为包内 README 单一来源）。客户从 Releases 下载 tar.gz + sha256。
+**版本与发布：** 仓库根 `VERSION`（纯 semver，当前 `1.0.10`）是唯一版本源——build.sh 读取、CI 校验 tag==VERSION（不一致 CI fail）。`git tag v<VERSION>` 推送 → [`.github/workflows/build-release.yml`](.github/workflows/build-release.yml) 构建并 `gh release create`，Release 说明由 `RELEASE_NOTES.md`（`@VERSION@` 占位符）渲染（也作为包内 README 单一来源）。客户从 Releases 下载 tar.gz + sha256。
 
 **客户侧脚本（`deploy/dist/payload/`，打进交付包）：**
 
@@ -136,7 +136,7 @@ build.sh 流程：go 交叉编译 server（`CGO_ENABLED=0`）→ web/docs `npm b
 - **server 容器 uid 10001**：bind-mount 的 `config.prod.yaml` 必须 `644`（`install.sh`/`restore.sh` 已做；`600` → `permission denied` 崩溃循环）。`Dockerfile.server` 必须 `mkdir -p /app/uploads/firmware && chown -R app:app /app`，否则 named volume 首次复制继承 root → OTA 固件上传 EPERM
 - 探针 `server/internal/api/health.go`：`/api/v1/healthz`（存活，无依赖，compose healthcheck 用）+ `/readyz`（DB ping，install/upgrade 轮询用）——拆双端点避免 DB 抖动触发重启
 - EMQX 的 `emqx ctl status` 超时 / compose `unhealthy` 标签是**假阴性**（dist 协议 ping）；EMQX 实际正常，看设备 auth 回调 200 + server 内部 MQTT 客户端连接 `mqtt connected`
-- 第二期未做（位置已标记）：版本化 migration（替裸 AutoMigrate）、ldflags 版本注入、license 授权、捆绑 Docker 离线安装、arm64 实测
+- 第二期未做（位置已标记）：版本化 migration（替裸 AutoMigrate）、license 授权、捆绑 Docker 离线安装、arm64 实测（ldflags 版本注入已由 build.sh 落地）
 
 ## Test Deployment (Aliyun ECS)
 

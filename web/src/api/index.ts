@@ -316,6 +316,11 @@ export const api = {
   deviceLatest: (id: number | string) => http.get(`/devices/${id}/latest`) as Promise<any>,
   deviceHistory: (id: number | string, params?: any) =>
     http.get(`/devices/${id}/history`, { params }) as Promise<{ ts: number; data: Record<string, any> }[]>,
+  // 聚合历史查询（长时间范围降采样）：agg=avg/min/max/sum/count，interval 缺省由服务端按范围自动取整
+  deviceHistoryAgg: (id: number | string, params?: { start?: number; end?: number; fields: string; agg?: string; interval?: string }) =>
+    http.get(`/devices/${id}/history/agg`, { params }) as Promise<{ agg: string; intervalSeconds: number; points: { ts: number; data: Record<string, any> }[] }>,
+  batchUpdateDevices: (data: { ids: number[]; action: 'disable' | 'enable' | 'delete' | 'moveGroup'; groupId?: number }) =>
+    http.post('/devices/batch-update', data) as Promise<{ success: number; skipped: number[]; failed: Record<number, string> }>,
   sendCommand: (id: number | string, payload: any) => http.post(`/devices/${id}/command`, payload),
 
   getThingModel: (productId: number | string) =>

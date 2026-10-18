@@ -71,25 +71,29 @@
 **数据与物模型**
 - 物模型 TSL（properties / events / services），支持 JSON 导入导出
 - TimescaleDB 超表存储遥测，自动保留（默认 30 天）与压缩（7 天后）
+- 历史聚合查询 `GET /devices/:id/history/agg`：avg/min/max/sum/count 按时间桶降采样（桶宽显式指定或按范围自动取整），长时段曲线不再受 1 万行原始点上限约束
+- 设备自带时间戳：payload 顶层 `ts`（毫秒）在合理窗口内（服务器时间 −7 天 ~ +5 分钟）优先于服务器时间入库，支持 DTU 断网缓存补传保留原始采集时间
 - Redis Lua 原子合并最新值，避免并发竞态
 - 自定义协议 goja JS 脚本 `decode(bytes)` / `encode(obj)`，200ms 执行超时
 
 **设备控制**
+- 设备标签筛选（jsonb 包含匹配 + GIN 索引）与批量操作（禁用 / 启用 / 删除 / 移动分组，单次 ≤200 台）
 - 下行通道自动决策：TCP 在线 → Modbus 点位写 / 网关透传；否则走 MQTT
 - 设备影子（desired / reported），上线补发期望值、达成自动清除
-- 指令 messageId 应答机制（pending → acked）
+- 指令 messageId 应答机制（pending → acked；超时未应答由每分钟扫描自动置 timeout）
 - OTA 升级（固件 SHA-256、批量任务、进度上报）
 - 远程配置版本化下发、产品广播、NTP 对时、网关子设备协议
 
 **规则与告警**
 - 三类规则：阈值告警 `alarm`、离线告警 `offline`、数据转发 `forward`
 - 复合条件（and/or 递归）、静默期、告警自动恢复
-- 转发目标：Webhook（SSRF 防护 + 重试退避）/ Kafka / MQTT 桥接
+- 转发目标：Webhook（SSRF 防护 + 重试退避）/ MQTT 桥接（QoS 1）；Kafka 为占位、暂未实现（创建时被拒绝）
 
 **开放与运维**
 - OpenAPI（`/openapi/v1`）HMAC-SHA256 签名鉴权，复用管理端能力
 - 平台内置设备模拟器、MQTT 调试台、消息轨迹（分阶段耗时）、设备日志
 - 可视化大屏（KPI + 实时告警）、Vue3 管理后台
+- 控制台新手引导（概览页四步上手卡，随进度自动完成）、全站空状态操作引导、帮助中心前台（超管维护 markdown，全用户可读）
 - **超管后台**（admin 专属）：系统运行状态、热更新参数（注册开关/令牌有效期/日志保留）、平台公告、帮助中心在线编辑、全量用户管理、跨账号全局日志检索
 - EMQX 规则引擎直写 TimescaleDB 快路径，后端跳过 DB 写入
 
@@ -326,7 +330,7 @@ function encode(obj) {
 |---|---|---|
 | 下发时创建 | `pending` | 属性设置 / 服务调用 |
 | 设备应答 | `acked` | 收到匹配 `messageId` 的 reply（仅 pending 可翻转，幂等） |
-| 超时 | `timeout` | （状态定义存在，目前无自动扫描） |
+| 超时 | `timeout` | 后台每分钟扫描：pending 超过自身 `timeout_ms`（默认 10s）未应答 |
 
 ### 其它下行协议
 
@@ -366,7 +370,7 @@ function encode(obj) {
 - **告警级别**：`warning` / `critical`；状态：`firing` / `resolved`（确认 `confirmed` 为独立时间戳）
 - **规则缓存**：按 userID 分组，30 秒 TTL
 
-**转发目标**：Webhook（SSRF 防护 + 指数退避重试，默认 3 次）/ Kafka / MQTT 桥接（QoS 1）
+**转发目标**：Webhook（SSRF 防护 + 指数退避重试，默认 3 次）/ MQTT 桥接（QoS 1）；Kafka 为占位、暂未实现（创建时被拒绝）
 
 ---
 
@@ -393,10 +397,10 @@ function encode(obj) {
 | 方法 | 路径 |
 |---|---|
 | GET | `/devices` / `/devices/:id` |
-| GET | `/devices/:id/latest` / `/devices/:id/history` / `/devices/:id/shadow` |
+| GET | `/devices/:id/latest` / `/devices/:id/history` / `/devices/:id/history/agg` / `/devices/:id/shadow` |
 | POST | `/devices/:id/property` / `/devices/:id/command` |
 
-> 签名仅覆盖 `appKey + timestamp`，不含请求体；持有 AppSecret 即可对应用归属资源签名。
+> 请求体哈希与 nonce 均纳入签名，同一 AppKey 的 nonce 不可重复（防重放）；持有 AppSecret 即可对应用归属资源签名。
 
 ---
 
@@ -578,7 +582,7 @@ tools/simulator/        设备模拟器（MQTT / TCP透传 / TCP+Modbus）
 - **JWT 密钥**默认为占位值 `iot-platform-jwt-secret-change-me`，部署前必须更改。
 - **默认管理员** `admin/admin123`、**MQTT 内部账号** `iot-platform-internal/internal-secret-2026`、**数据库** `iot/iot123456` 均为演示值，生产环境务必替换。
 - **EMQX 鉴权回调**（`/emqx/auth`、`/emqx/acl`）注册在公开路由组，须通过内网/白名单保护，避免外网伪造 `allow`。
-- **Webhook SSRF 防护**仅校验主机名字面量（禁止 localhost、`169.254.169.254`、回环与链路本地地址），不解析 DNS，无法防御域名解析到内网的场景。
+- **Webhook / MQTT 桥接 SSRF 防护**：HTTP 客户端在 Dial 阶段对 DNS 解析后的实际 IP 校验（禁止回环/私网/链路本地/云元数据地址），重定向逐跳复检（`internal/rule/engine.go`）；MQTT 桥接 broker 同样校验域名解析结果（`internal/rule/forward.go`）。
 - **OTA 通知送达边界**：`ota.push` 严格按设备接入协议选路——TCP/DTU 设备在线走网关（多实例经 Redis 频道 `tcp:down` 扇出），MQTT 设备走 EMQX（QoS 1）；设备离线如实计入未送达，**不再回退其它协议**（`ota.push` 非 retained、不重发，错过的设备不会自动补送）。固件下载在多实例下需启用 s3 对象存储——local 模式文件仅存于接收上传的实例。
 - `mqtt.tls.insecure_skip_verify` 默认 `true`，生产启用 TLS 时应关闭并配置 CA 证书。
 

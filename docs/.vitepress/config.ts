@@ -31,7 +31,9 @@ export default defineConfig({
           text: '开始',
           collapsed: false,
           items: [
+            { text: '快速上手', link: '/guide/quickstart' },
             { text: '协议总览', link: '/guide/overview' },
+            { text: '常见问题 FAQ', link: '/guide/faq' },
             { text: '示例代码', link: '/guide/examples' }
           ]
         },

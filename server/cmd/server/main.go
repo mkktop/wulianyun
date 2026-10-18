@@ -153,6 +153,9 @@ func main() {
 	// 离线告警巡检
 	rule.StartOfflineChecker()
 
+	// 指令超时扫描（pending 超过自身 timeout_ms 未应答 → timeout）
+	service.StartCommandTimeoutSweeper()
+
 	r := api.NewRouter()
 	srv := &http.Server{
 		Addr:    config.C.Server.Addr,

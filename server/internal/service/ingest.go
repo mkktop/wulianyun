@@ -173,6 +173,34 @@ var nonTelemetryKeys = map[string]bool{
 	"params": true, "data": true, "result": true, "ts": true,
 }
 
+// deviceTimestamp 从 payload 提取设备侧时间戳（毫秒），JSON 数字或纯数字字符串均可；
+// 超出 [now-7天, now+5分钟] 合理窗口（含解析失败）时回退服务器时间。
+// 注：ts 属系统键，不会进入 latest/影子/规则（见 nonTelemetryKeys），只影响入库与推送展示。
+func deviceTimestamp(raw interface{}, now time.Time) time.Time {
+	var ms int64
+	switch v := raw.(type) {
+	case float64:
+		ms = int64(v)
+	case string:
+		for _, ch := range v {
+			if ch < '0' || ch > '9' {
+				return now
+			}
+			ms = ms*10 + int64(ch-'0')
+		}
+	default:
+		return now
+	}
+	if ms <= 0 {
+		return now
+	}
+	t := time.UnixMilli(ms)
+	if t.Before(now.Add(-7*24*time.Hour)) || t.After(now.Add(5*time.Minute)) {
+		return now
+	}
+	return t
+}
+
 // HandleTelemetry 处理设备上行数据（JSON 对象）；含 method=event.post 时分流到事件上报
 func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	traceID := generateTraceID()
@@ -205,6 +233,9 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	}
 
 	now := time.Now()
+	// 设备自带时间戳优先（payload 的 ts，毫秒）：DTU 断网缓存补传时保留原始采集时间；
+	// 只接受 [now-7天, now+5分钟] 区间，设备时钟错乱时回退服务器时间，防时序被污染
+	ts := deviceTimestamp(data["ts"], now)
 
 	// TSL 物模型校验（属性定义一次加载，校验与白名单过滤复用，避免同消息两次查库）
 	t1 := time.Now()
@@ -214,7 +245,7 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 	// 快慢路径分离：EMQX 规则引擎开启时跳过 DB 写入（快路径），仅做业务逻辑
 	if !config.C.EMQXRule.Enabled {
 		t := model.Telemetry{
-			Ts: now, DeviceID: d.ID, ProductKey: productKey, DeviceName: deviceName,
+			Ts: ts, DeviceID: d.ID, ProductKey: productKey, DeviceName: deviceName,
 			Data: payload, Valid: valid,
 		}
 		if !valid && len(validationErrors) > 0 {
@@ -251,14 +282,14 @@ func HandleTelemetry(productKey, deviceName string, payload []byte) {
 		mergeCtx, mergeCancel := repository.CtxWith(2 * time.Second)
 		if err := mergeLatestScript.Run(mergeCtx, repository.RDB,
 			[]string{latestKey(d.ID)},
-			string(mergePayload), fmt.Sprintf("%d", now.UnixMilli()),
+			string(mergePayload), fmt.Sprintf("%d", ts.UnixMilli()),
 		).Err(); err != nil {
 			slog.Warn("merge latest cache failed", "device", d.Name, "err", err)
 		}
 		mergeCancel()
 
 		// 实时推送：设备归属者 + 其一级父账号（一级实时看二级设备曲线）
-		telemetryMsg := map[string]interface{}{"ts": now.UnixMilli(), "data": mergeData}
+		telemetryMsg := map[string]interface{}{"ts": ts.UnixMilli(), "data": mergeData}
 		for _, uid := range PushRecipients(d.UserID) {
 			ws.H.PushTelemetry(uid, d.ID, telemetryMsg)
 		}
@@ -454,9 +485,9 @@ func HandleDeviceReply(topic string, payload []byte) {
 	replyCtx, replyCancel := repository.Ctx()
 	defer replyCancel()
 	result := repository.DB.WithContext(replyCtx).Model(&model.CommandRequest{}).
-		Where("message_id = ? AND status = ?", reply.MessageID, "pending").
+		Where("message_id = ? AND status = ?", reply.MessageID, model.CommandStatusPending).
 		Updates(map[string]interface{}{
-			"status":   "acked",
+			"status":   model.CommandStatusAcked,
 			"response": string(payload),
 			"acked_at": now,
 		})

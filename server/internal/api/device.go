@@ -114,6 +114,11 @@ func ListDevices(c *gin.Context) {
 	if gid := c.Query("groupId"); gid != "" {
 		q = q.Where("group_id = ?", gid)
 	}
+	// 标签过滤：tags 为 jsonb 数组，包含匹配（tags @> ["tag"]）；字段名走参数绑定防注入
+	if tag := c.Query("tag"); tag != "" {
+		tagJSON, _ := json.Marshal([]string{tag})
+		q = q.Where("tags @> CAST(? AS jsonb)", string(tagJSON))
+	}
 	var total int64
 	q.Count(&total)
 	page, size := pageArgs(c)
@@ -318,4 +323,85 @@ func RemoveSubDevice(c *gin.Context) {
 	subID := c.Param("subId")
 	repository.DB.Model(&model.Device{}).Scopes(ownedScope(c, "")).Where("id = ? AND gateway_id = ?", subID, gatewayID).Update("gateway_id", nil)
 	OK(c, nil)
+}
+
+// BatchUpdateDevices 批量操作设备：{ids:[], action: disable|enable|delete|moveGroup, groupId?}
+// 逐台按 ownedScope 圈定后处理，返回成功/失败清单；单次上限 200 台。
+func BatchUpdateDevices(c *gin.Context) {
+	var req struct {
+		IDs     []uint  `json:"ids" binding:"required"`
+		Action  string  `json:"action" binding:"required,oneof=disable enable delete moveGroup"`
+		GroupID *uint   `json:"groupId"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.IDs) == 0 {
+		Fail(c, 400, "参数错误：ids 与 action 必填")
+		return
+	}
+	if len(req.IDs) > 200 {
+		Fail(c, 400, "单次最多操作 200 台设备")
+		return
+	}
+	if req.Action == "moveGroup" {
+		if req.GroupID == nil || *req.GroupID == 0 {
+			Fail(c, 400, "moveGroup 需要 groupId")
+			return
+		}
+		var g model.DeviceGroup
+		if err := repository.DB.Scopes(ownedScope(c, "")).Where("id = ?", *req.GroupID).First(&g).Error; err != nil {
+			Fail(c, 400, "分组不存在或无权访问")
+			return
+		}
+	}
+	var devices []model.Device
+	if err := repository.DB.Scopes(ownedScope(c, "")).Where("id IN ?", req.IDs).Find(&devices).Error; err != nil {
+		Fail(c, 500, "查询失败")
+		return
+	}
+	owned := make(map[uint]bool, len(devices))
+	for _, d := range devices {
+		owned[d.ID] = true
+	}
+	skipped := make([]uint, 0)
+	for _, id := range req.IDs {
+		if !owned[id] {
+			skipped = append(skipped, id) // 不存在或越权：跳过不报错，结果里如实体现
+		}
+	}
+	failed := make(map[uint]string, 0)
+	done := make([]uint, 0, len(devices))
+	for i := range devices {
+		d := &devices[i]
+		var err error
+		switch req.Action {
+		case "disable":
+			err = repository.DB.Model(d).Update("status", model.DeviceStatusDisabled).Error
+		case "enable":
+			if d.Status != model.DeviceStatusDisabled {
+				done = append(done, d.ID) // 非禁用态启用是幂等操作，直接计成功
+				continue
+			}
+			err = repository.DB.Model(d).Update("status", model.DeviceStatusOffline).Error
+		case "moveGroup":
+			err = repository.DB.Model(d).Update("group_id", *req.GroupID).Error
+		case "delete":
+			// 与 DeleteDevice 相同的清理序列：踢 TCP 会话→级联删事件/影子→清缓存
+			gateway.KickDevice(d.ProductKey, d.Name)
+			err = repository.DB.Delete(d).Error
+			if err == nil {
+				repository.DB.Where("device_id = ?", d.ID).Delete(&model.DeviceEvent{})
+				repository.DB.Where("device_id = ?", d.ID).Delete(&model.DeviceShadow{})
+				service.InvalidateShadowCache(d.ID)
+				if repository.RDB != nil {
+					_ = repository.RDB.Del(context.Background(), "device:latest:"+strconv.FormatUint(uint64(d.ID), 10)).Err()
+				}
+			}
+		}
+		if err != nil {
+			failed[d.ID] = err.Error()
+			continue
+		}
+		service.InvalidateDeviceCache(d.ProductKey, d.Name)
+		done = append(done, d.ID)
+	}
+	OK(c, gin.H{"success": len(done), "skipped": skipped, "failed": failed})
 }

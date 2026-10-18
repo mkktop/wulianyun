@@ -25,6 +25,7 @@ const router = createRouter({
         { path: 'apps', component: () => import('../views/Apps.vue'), meta: { title: '应用管理' } },
         { path: 'accounts', component: () => import('../views/Accounts.vue'), meta: { title: '子账号管理' } },
         { path: 'ota', component: () => import('../views/OTA.vue'), meta: { title: 'OTA升级' } },
+        { path: 'help', component: () => import('../views/Help.vue'), meta: { title: '帮助中心' } },
         { path: 'tools/simulator', component: () => import('../views/DeviceSimulator.vue'), meta: { title: '设备模拟器' } },
         { path: 'tools/mqtt-debug', component: () => import('../views/MqttDebug.vue'), meta: { title: 'MQTT调试台' } },
         { path: 'tools/traces', component: () => import('../views/MessageTraces.vue'), meta: { title: '消息轨迹' } },

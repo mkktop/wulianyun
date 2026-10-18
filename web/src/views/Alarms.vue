@@ -39,6 +39,14 @@
       </div>
 
       <el-table :data="list" v-loading="loading" stripe>
+        <template #empty>
+          <el-empty description="暂无告警记录" :image-size="80">
+            <div class="empty-guide">
+              <p class="guide-tip">设备运行正常。配置阈值 / 离线告警规则后，异常会第一时间出现在这里</p>
+              <el-button type="primary" @click="$router.push('/console/rules')">去配置告警规则</el-button>
+            </div>
+          </el-empty>
+        </template>
         <el-table-column label="级别" width="90">
           <template #default="{ row }">
             <el-tag :type="row.level === 'critical' ? 'danger' : 'warning'" size="small">
@@ -198,6 +206,8 @@ onUnmounted(() => {
 <style scoped>
 .stat-row { margin-bottom: 16px; }
 .stat-card { border-radius: 10px; overflow: hidden; transition: transform 0.2s; }
+.empty-guide { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.guide-tip { color: #909399; font-size: 13px; margin: 0; }
 .stat-card:hover { transform: translateY(-2px); }
 .stat {
   display: flex; align-items: center; gap: 14px; padding: 18px;

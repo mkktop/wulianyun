@@ -10,6 +10,14 @@
     </div>
 
     <el-table :data="list" v-loading="loading" stripe>
+      <template #empty>
+        <el-empty description="还没有应用" :image-size="80">
+          <div class="empty-guide">
+            <p class="guide-tip">创建应用获得 AppKey / AppSecret，用 HMAC 签名调用开放接口读写设备数据</p>
+            <el-button type="primary" @click="dialogVisible = true">创建应用</el-button>
+          </div>
+        </el-empty>
+      </template>
       <el-table-column prop="name" label="应用名称" min-width="130" />
       <el-table-column label="AppKey" min-width="200">
         <template #default="{ row }">
@@ -132,4 +140,6 @@ onMounted(load)
 
 <style scoped>
 .toolbar { display: flex; align-items: center; margin-bottom: 16px; }
+.empty-guide { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.guide-tip { color: #909399; font-size: 13px; margin: 0; }
 </style>

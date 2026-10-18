@@ -33,6 +33,9 @@
         <el-menu-item index="/screen">
           <el-icon><DataBoard /></el-icon><template #title><span>可视化大屏</span></template>
         </el-menu-item>
+        <el-menu-item index="/console/help">
+          <el-icon><QuestionFilled /></el-icon><template #title><span>帮助中心</span></template>
+        </el-menu-item>
         <!-- 平台超管专属后台（仅 admin 角色可见；后端 AdminAuth 兜底拦截） -->
         <el-sub-menu v-if="tier === 'platform'" index="system">
           <template #title><el-icon><Setting /></el-icon><span>系统管理</span></template>

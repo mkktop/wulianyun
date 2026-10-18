@@ -62,7 +62,7 @@ type CommandRequest struct {
 	UserID     uint       `gorm:"index" json:"userId"`
 	DeviceID   uint       `gorm:"index" json:"deviceId"`
 	DeviceName string     `gorm:"size:64" json:"deviceName"`
-	Method     string     `gorm:"size:50" json:"method"`     // property.set / service.invoke
+	Method     string     `gorm:"size:50" json:"method"` // property.set / service.invoke
 	Service    string     `gorm:"size:50" json:"service"`
 	Payload    string     `gorm:"type:text" json:"payload"`
 	Status     string     `gorm:"size:16;default:pending" json:"status"` // pending / acked / timeout
@@ -71,6 +71,13 @@ type CommandRequest struct {
 	CreatedAt  time.Time  `json:"createdAt"`
 	AckedAt    *time.Time `json:"ackedAt,omitempty"`
 }
+
+// 指令状态常量（Status 字段取值）
+const (
+	CommandStatusPending = "pending"
+	CommandStatusAcked   = "acked"
+	CommandStatusTimeout = "timeout"
+)
 
 // Firmware 固件版本
 type Firmware struct {

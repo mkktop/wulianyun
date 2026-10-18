@@ -71,6 +71,10 @@ func Init() error {
 		return err
 	}
 
+	// 标签过滤（tags @>）与指令超时扫描的热路径索引；已存在时幂等
+	DB.Exec("CREATE INDEX IF NOT EXISTS idx_devices_tags ON devices USING gin (tags)")
+	DB.Exec("CREATE INDEX IF NOT EXISTS idx_command_requests_pending ON command_requests (created_at) WHERE status = 'pending'")
+
 	// 尝试启用 TimescaleDB 并把 telemetries 转为超表；失败不阻塞（退化为普通表）
 	if err := DB.Exec("CREATE EXTENSION IF NOT EXISTS timescaledb").Error; err != nil {
 		slog.Warn("timescaledb extension unavailable, telemetry falls back to plain table", "err", err)

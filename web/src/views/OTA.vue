@@ -12,6 +12,14 @@
             </el-button>
           </div>
           <el-table :data="firmwares" v-loading="fwLoading" stripe>
+            <template #empty>
+              <el-empty description="还没有固件" :image-size="80">
+                <div class="empty-guide">
+                  <p class="guide-tip">上传固件包（自动计算 SHA-256 / CRC32 校验值），再创建批量升级任务</p>
+                  <el-button type="primary" @click="showUpload = true">上传固件</el-button>
+                </div>
+              </el-empty>
+            </template>
             <el-table-column prop="id" label="ID" width="70" />
             <el-table-column label="产品" min-width="140">
               <template #default="{ row }">{{ productName(row.productId) }}</template>
@@ -52,6 +60,14 @@
             <el-button @click="loadTasks" :icon="Refresh">刷新</el-button>
           </div>
           <el-table :data="tasks" v-loading="taskLoading" stripe>
+            <template #empty>
+              <el-empty description="还没有升级任务" :image-size="80">
+                <div class="empty-guide">
+                  <p class="guide-tip">先上传固件，再选择目标设备批量下发升级</p>
+                  <el-button type="primary" :disabled="!firmwares.length" @click="showCreateTask = true">创建升级任务</el-button>
+                </div>
+              </el-empty>
+            </template>
             <el-table-column prop="id" label="ID" width="70" />
             <el-table-column label="产品" min-width="120">
               <template #default="{ row }">{{ row.productName || '-' }}</template>
@@ -324,4 +340,6 @@ onMounted(async () => {
 
 <style scoped>
 .toolbar { display: flex; justify-content: space-between; margin-bottom: 12px; }
+.empty-guide { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.guide-tip { color: #909399; font-size: 13px; margin: 0; }
 </style>
